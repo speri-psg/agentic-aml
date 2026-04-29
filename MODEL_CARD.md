@@ -23,6 +23,8 @@ compliance analytics. It acts as an agentic tool-calling assistant that routes u
 to the correct analytics function, calls it with correctly structured parameters, and
 interprets the pre-computed results without hallucinating numbers.
 
+> **Fine-tuning on a bank's own alert history continuously improves ARIA's precision, reducing the false positive burden on AML investigators over time.**
+
 ## Model Details
 
 | Property | Value |
