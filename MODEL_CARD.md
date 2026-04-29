@@ -113,9 +113,23 @@ python application.py
 - **Target modules**: `q_proj`, `k_proj`, `v_proj`, `o_proj`, `gate_proj`, `up_proj`, `down_proj`
 - **Epochs**: 3 | **Effective batch size**: 8 (batch=2, grad_accum=4)
 - **Learning rate**: 2e-4 with cosine scheduler, 5% warmup
-- **Hardware**: RTX 3090 24GB on vast.ai
+- **Hardware**: NVIDIA RTX 3090 / RTX 4090 / RTX 5090
+- **Inference requirements**: 16 GB VRAM minimum (model is 8 GB+ at Q8_0; 16 GB leaves headroom for context and KV cache)
 - **Training data**: 933 examples across threshold tuning, segmentation, policy Q&A,
   OFAC screening, greetings, and out-of-scope handling
+
+## Data Privacy and Air-Gap Deployment
+
+ARIA-v1 is designed to run **entirely on-premises** inside a bank's own infrastructure.
+All analytics — threshold sweeps, segmentation, SAR backtests, OFAC screening — are
+executed by local Python functions against the bank's own data. The model never sends
+customer data, transaction records, or alert information to any external API or cloud LLM.
+
+When a bank deploys ARIA-v1 on their own hardware, customer data stays within their
+environment at all times. There is no dependency on OpenAI, Anthropic, or any third-party
+inference service. This makes ARIA-v1 suitable for regulated institutions where data
+residency, confidentiality, and audit requirements prohibit sending customer data outside
+the bank's perimeter.
 
 ## Intended Use
 
