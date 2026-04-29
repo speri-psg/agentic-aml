@@ -158,3 +158,7 @@ The model may not be used to build a competing AML transaction monitoring or
 financial crime analytics product or service.
 
 Full license: [LICENSE_MODEL](https://github.com/speri-psg/agentic-aml/blob/main/LICENSE_MODEL)
+
+## Contact
+
+For commercial licensing, enterprise enquiries, demos, or deep dives, open an issue on [GitHub](https://github.com/speri-psg/agentic-aml) or email [speri@princetonstrategygroup.com](mailto:speri@princetonstrategygroup.com).

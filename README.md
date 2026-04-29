@@ -135,4 +135,4 @@ and total funding each below **USD $2 million**. Commercial use above that thres
 requires a separate license. The model may not be used to build a competing
 AML transaction monitoring or financial crime analytics product or service.
 
-For commercial licensing enquiries, open an issue in this repository.
+For commercial licensing, enterprise enquiries, demos, or deep dives, open an issue in this repository or email [speri@princetonstrategygroup.com](mailto:speri@princetonstrategygroup.com).
