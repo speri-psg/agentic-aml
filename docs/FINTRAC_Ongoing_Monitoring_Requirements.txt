@@ -1,0 +1,76 @@
+FINTRAC Guidance: Ongoing Monitoring Requirements
+Source: https://fintrac-canafe.canada.ca/guidance-directives/client-clientele/omr-eng
+Effective: June 1, 2021
+
+OVERVIEW
+This guidance applies to all reporting entities under the Proceeds of Crime (Money Laundering) and Terrorist Financing Act (PCMLTFA). Ongoing monitoring is a systematic review process that all entities with business relationships must conduct.
+
+KEY DEFINITIONS
+
+Ongoing Monitoring: A systematic review process examining client information to:
+- Identify suspicious transactions requiring FINTRAC reporting
+- Keep identification and beneficial ownership data current
+- Reassess client risk levels
+- Verify transaction consistency with client profiles
+
+Business Relationship: A relationship that continues beyond a single transaction; typically formed when an account is opened or ongoing services are provided.
+
+CORE REQUIREMENTS
+
+When Monitoring Applies:
+Reporting entities must "periodically conduct" ongoing monitoring for all business relationships. Frequency is based on risk assessment:
+- Low-risk clients: less frequent reviews
+- High-risk clients: enhanced measures required
+
+ENHANCED ONGOING MONITORING
+High-risk clients require additional protective measures including:
+- Management-approved transaction review schedules
+- More frequent high-risk transaction reports
+- Flagging unusual activities
+- Setting account limits triggering mandatory reviews
+- Frequent transaction screening against suspicious indicators
+
+EXCEPTIONS
+Two categories are exempt from ongoing monitoring requirements:
+1. Financial entities: Group plan accounts in dividend/distribution reinvestment plans (if sponsor operates in FATF member countries)
+2. Insurance businesses: Reinsurance transactions
+
+RECORD-KEEPING REQUIREMENTS
+Documentation must include:
+- Monitoring processes and procedures
+- Enhanced monitoring protocols for high-risk clients
+- Information obtained from monitoring activities
+- Records on client identification updates
+
+Retention: Minimum five years from creation date.
+
+MONITORING CESSATION
+- Standard monitoring ends when business relationships terminate
+- Enhanced monitoring ends either at relationship termination or when clients no longer pose high risk (regular monitoring continues at appropriate frequency)
+
+RISK-BASED APPROACH
+The frequency and depth of monitoring must be calibrated to the entity's risk-based assessment of each client. Factors influencing risk level include:
+- Customer type (individual, business, politically exposed person)
+- Geographic risk (high-risk jurisdictions, FATF-identified countries)
+- Product/service risk (cash-intensive products, international transfers)
+- Transaction patterns and volumes
+- Source of funds complexity
+
+POLITICALLY EXPOSED PERSONS (PEPs)
+Foreign PEPs: Automatically high-risk; enhanced ongoing monitoring is mandatory.
+Domestic PEPs and heads of international organizations: High-risk if assessed as such; determine within 30 days of establishing a business relationship or of becoming aware of PEP status.
+
+BENEFICIAL OWNERSHIP
+Entities must take reasonable measures to obtain beneficial ownership information for entities with which they have business relationships. This information must be kept current as part of ongoing monitoring.
+
+Beneficial owner: Any individual who directly or indirectly owns or controls 25% or more of an entity, or controls the entity by other means.
+
+CANADA vs USA COMPARISON NOTE
+Canada (FINTRAC/PCMLTFA): Requires "periodic" ongoing monitoring for all business relationships; frequency determined by risk.
+USA (FinCEN CDD Rule, 31 CFR 1020.210): Requires "ongoing monitoring for the purpose of identifying and reporting suspicious transactions" and "updating customer information on a risk basis."
+
+Key differences:
+- Canada explicitly requires monitoring cessation procedures
+- US CDD Rule (2016) added a 5th pillar (beneficial ownership) to existing AML program requirements
+- Both require enhanced due diligence for high-risk customers
+- Canada's 25% beneficial ownership threshold matches the US FinCEN CDD Rule threshold

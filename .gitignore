@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# ChromaDB (rebuilt locally via ingest.py)
+chroma_db/
+
+# Raw source data (not for public distribution)
+ss_files/
+ss_files_anon/
+
+# User-uploaded KB documents
+uploads/
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Secrets / env
+.env
+*.env
+
+# Generated data files
+docs/ds_segmentation_data.csv
+docs/ss_segmentation_data.csv

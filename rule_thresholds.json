@@ -1,0 +1,79 @@
+{
+  "_comment": "Current operational thresholds for each AML rule. Edit this file when rules change — no Python code changes needed.",
+  "activity deviation (ach)": {
+    "current_condition": "Monthly Outgoing ACH >= $50K AND >= 5 std dev above 12-month profile mean",
+    "thresholds": {
+      "floor_amount": 50000,
+      "z_threshold": 5.0
+    }
+  },
+  "activity deviation (check)": {
+    "current_condition": "Monthly Outgoing Check >= $50K AND >= 2 std dev above 12-month profile mean",
+    "thresholds": {
+      "floor_amount": 50000,
+      "z_threshold": 2.0
+    }
+  },
+  "elder abuse": {
+    "current_condition": "Age >= 60 AND 14-day outgoing >= $5K AND >= 3 std dev above 90-day mean",
+    "thresholds": {
+      "floor_amount": 5000,
+      "z_threshold": 3.0,
+      "age_threshold": 60
+    }
+  },
+  "velocity single": {
+    "current_condition": ">=1 pair (in+out) within 14 days, out=90-110% of in, pair total >= $20K",
+    "thresholds": {
+      "pair_total": 20000,
+      "ratio_tolerance": 0.10
+    }
+  },
+  "detect excessive": {
+    "current_condition": "5-day incoming Cash+Check sum > $10K",
+    "thresholds": {
+      "floor_amount": 10000,
+      "time_window": 5
+    }
+  },
+  "structuring (incoming cash)": {
+    "current_condition": "3 qualifying days within 14-day window, each day's Cash CashIn total $3K-$40K",
+    "thresholds": {
+      "daily_floor": 3000,
+      "days_required": 3
+    }
+  },
+  "structuring (outgoing cash)": {
+    "current_condition": "3 qualifying days within 14-day window, each day's Cash CashOut total $7K-$30K",
+    "thresholds": {
+      "daily_floor": 7000,
+      "days_required": 3
+    }
+  },
+  "ctr client": {
+    "current_condition": "Cash + Currency Exchange in/out total > $10K",
+    "thresholds": {
+      "floor_amount": 10000
+    }
+  },
+  "burst in originator activity": {
+    "current_condition": "5-day Incoming Wire/ACH sum >= $5K, >= 3 transactions, >= 2 distinct counterparties",
+    "thresholds": {
+      "floor_amount": 5000,
+      "min_transactions": 3
+    }
+  },
+  "burst in beneficiary activity": {
+    "current_condition": "5-day Outgoing Wire/ACH sum >= $5K, >= 3 transactions, >= 2 distinct counterparties",
+    "thresholds": {
+      "floor_amount": 5000,
+      "min_transactions": 3
+    }
+  },
+  "risky international transfer": {
+    "current_condition": "Single Wire to/from medium-risk country >= $300K or >= $500K",
+    "thresholds": {
+      "floor_amount": 300000
+    }
+  }
+}

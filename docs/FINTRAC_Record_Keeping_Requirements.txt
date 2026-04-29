@@ -1,0 +1,104 @@
+FINTRAC Guidance: Record Keeping Requirements for Financial Entities
+Source: https://fintrac-canafe.canada.ca/guidance-directives/recordkeeping-document/record/fin-eng
+Effective: June 1, 2021
+
+OVERVIEW
+Financial entities must maintain records under the Proceeds of Crime (Money Laundering) and Terrorist Financing Act (PCMLTFA) and associated Regulations.
+
+CORE RECORD CATEGORIES AND RETENTION PERIODS
+
+Reports to FINTRAC (5-year retention from submission/creation):
+- Suspicious Transaction Reports (STRs): Keep copies; retain 5 years from submission
+- Listed Person/Entity Property Reports: Keep copies; retain 5 years from submission
+- Large Cash Transaction Reports (LCTRs): Keep copies; retain 5 years from creation
+- Large Virtual Currency Transaction Reports: Keep copies; retain 5 years from creation
+- Electronic Funds Transfer Reports: Keep copies; retain 5 years from creation
+
+TRANSACTION RECORDS
+
+Large Cash Transactions ($10,000+) — retain 5 years from creation:
+- Date, account details, parties involved (name, address, DOB, occupation)
+- Currency types/amounts
+- Transaction purpose
+- Receipt method
+- Exchange rates
+- Remittance details
+
+Large Virtual Currency Transactions ($10,000+ equivalent) — retain 5 years:
+- Date, account holder names, participant details
+- VC types/amounts
+- Exchange rates
+- Transaction identifiers
+- Blockchain addresses
+
+$3,000+ Transactions — retain 5 years:
+Required for traveller's cheques, money orders, and similar instruments.
+
+Electronic Funds Transfers ($1,000+) — retain 5 years:
+- Initiation details
+- Beneficiary information
+- Exchange rates
+- Account numbers
+
+Virtual Currency Transfers ($1,000+ equivalent) — retain 5 years:
+- Transaction identifiers
+- Blockchain addresses
+
+EXCHANGE RECORDS (5-year retention)
+- Foreign currency exchanges (all amounts)
+- VC exchange transactions (all amounts)
+
+ACCOUNT RECORDS (5 years from account closure)
+- Account holder and authorized person details
+- Signature cards
+- Intended account use
+- Applications
+- Operating agreements
+- Debit/credit memos
+- Deposit slips
+- Account statements
+- Cleared cheque records
+- Credit arrangement information
+
+CREDIT CARD ACCOUNTS
+- Account holder/authorized person records: 5 years from closure
+- Applications: 5 years from closure
+- Statements: 5 years from creation
+- Transaction records: 5 years from creation
+
+PREPAID PAYMENT PRODUCTS
+- Account holder/authorized user records
+- Applications: 5 years from closure
+- Statements: 5 years from creation
+- Payment slips
+- Transaction records
+
+TRUST RECORDS
+Trust companies must keep:
+- Trust deed copies
+- Settlor information
+- Corporate power-to-bind documentation (if applicable)
+- Beneficiary records for inter vivos trusts
+
+ACCESS AND STORAGE REQUIREMENTS
+- Records must be provided to FINTRAC within 30 days of request
+- Must be "readily accessible" via electronic or machine-readable formats
+- Paper copies must be producible from stored formats
+
+KEY EXEMPTIONS
+- Credit card/PPP transactions when beneficiary has pre-existing merchant agreements
+- Credit card acquiring activities
+- Transactions involving other financial entities or public bodies
+- Very large corporations and trusts (consolidated statements)
+- Certain insurance and annuity products
+- Registered plan accounts
+- Virtual currency compensation for blockchain validation
+
+DOCUMENTATION STANDARDS
+When recording client information, entities should maximize descriptiveness — particularly regarding occupation or business nature — to establish transaction consistency with client profiles.
+
+CANADA vs USA COMPARISON NOTE
+Both Canada and the US require 5-year record retention for AML records.
+Canada: PCMLTFA Regulations specify retention from creation or closure date.
+USA: BSA (31 CFR 1010.430) requires records be retained for 5 years and be "retrievable within a reasonable period of time."
+Key difference: Canada specifies "readily accessible" with a 30-day production window; US uses "reasonable period of time" (no fixed deadline).

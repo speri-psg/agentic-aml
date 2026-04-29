@@ -1,0 +1,104 @@
+ARIA Model License
+Modified OpenRAIL-M License
+Version 1.0, 2025
+
+This license governs use of the ARIA fine-tuned model weights and training
+data contained in this repository (the "Model"), including all files under
+finetune/data/ and any model weights distributed separately.
+
+The source code in this repository is separately licensed under the
+Apache License 2.0. See LICENSE for details.
+
+========================================================================
+SECTION I — PREAMBLE
+========================================================================
+
+This license is based on the OpenRAIL-M license framework and modified
+to reflect the dual-use nature of AI models in regulated industries.
+It is designed to enable open research and development while protecting
+against harmful or competitive misuse.
+
+========================================================================
+SECTION II — PERMITTED USES (NO CHARGE)
+========================================================================
+
+You may use, copy, modify, and distribute the Model, including for
+commercial purposes, at no charge, provided that You fall into one or
+more of the following categories at the time of use:
+
+  (a) Personal or hobbyist use with no associated revenue;
+
+  (b) Academic or non-profit research at an accredited educational
+      institution or recognized research organization;
+
+  (c) A company, startup, or individual whose total annual revenue AND
+      total cumulative funding (including grants, investments, and
+      loans) are each below USD $2,000,000 (two million US dollars)
+      at the time of use.
+
+========================================================================
+SECTION III — COMMERCIAL LICENSE REQUIRED
+========================================================================
+
+If You do not qualify under Section II, You must obtain a separate
+commercial license before using the Model in any product, service,
+research, or internal tooling. Please contact the maintainers via
+the repository to inquire about commercial licensing terms.
+
+========================================================================
+SECTION IV — USE RESTRICTIONS (ALL USERS)
+========================================================================
+
+Regardless of whether You qualify under Section II, You may NOT:
+
+  1. Use the Model, its weights, training data, or any Derivative Model
+     to develop, train, operate, or provide any product or service that
+     competes directly with an AML transaction monitoring or financial
+     crime analytics platform or service — whether offered commercially,
+     as open source, or as an internal tool for third parties.
+
+  2. Misrepresent the origin of the Model or remove copyright, license,
+     or attribution notices from any distribution.
+
+  3. Use the Model in any application that violates applicable law,
+     including laws related to financial crime, data privacy, or
+     consumer protection.
+
+  4. Sublicense the Model under terms that are inconsistent with this
+     license.
+
+========================================================================
+SECTION V — REDISTRIBUTION
+========================================================================
+
+If You distribute the Model or a Derivative Model, You must:
+
+  (a) Include a copy of this license;
+
+  (b) Clearly state any modifications You made;
+
+  (c) Not impose additional restrictions beyond those in this license
+      on recipients who qualify under Section II.
+
+========================================================================
+SECTION VI — DISCLAIMER OF WARRANTY
+========================================================================
+
+THE MODEL IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND
+NON-INFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM THE
+USE OF OR INABILITY TO USE THE MODEL.
+
+========================================================================
+SECTION VII — GOVERNING LAW
+========================================================================
+
+This license shall be governed by and construed in accordance with the
+laws of the jurisdiction in which the primary copyright holder resides,
+without regard to conflict of law principles.
+
+========================================================================
+
+Copyright 2025 ARIA Project Contributors

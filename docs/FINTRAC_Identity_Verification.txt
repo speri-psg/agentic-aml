@@ -1,0 +1,125 @@
+FINTRAC Guidance: Identity Verification — Methods and Triggers for Financial Entities
+Sources:
+- Methods: https://fintrac-canafe.canada.ca/guidance-directives/client-clientele/guide11/11-eng
+- When to verify (Financial Entities): https://fintrac-canafe.canada.ca/guidance-directives/client-clientele/client/fin-eng
+Effective: June 1, 2021
+
+WHEN IDENTITY VERIFICATION IS REQUIRED (Financial Entities)
+
+Transaction-Based Triggers:
+1. Large cash transactions: $10,000 or more in cash
+2. Large virtual currency transactions: $10,000 or more equivalent
+3. Suspicious transactions: regardless of amount
+4. Money orders/traveller's cheques: $3,000 or more
+5. International EFTs: $1,000 or more when initiated
+6. EFT beneficiaries: receiving $1,000 or more
+7. Virtual currency transfers: $1,000 or more equivalent
+8. VC to beneficiaries: $1,000 or more equivalent
+9. Foreign currency exchange: $3,000 or more
+10. VC exchange transactions: $1,000 or more equivalent
+
+Account-Based Triggers:
+- Account holders before first transaction (excluding initial deposit)
+- Persons authorized to give account instructions
+- Credit card account holders before activation
+- Prepaid payment product (PPP) account holders and authorized users
+- Trust settlors and co-trustees (within 15 days)
+
+Payment-Based Triggers:
+- Payments of $1,000 or more to PPP accounts
+
+KEY EXEMPTIONS
+
+Large Cash/VC Transactions:
+- Received from another financial entity or public body
+- Deposited to business accounts or automated banking machines
+
+Suspicious Transactions:
+- Already verified with no doubts remaining
+- Verification would tip off the client
+
+Account Openings:
+- Existing clients opening subsequent accounts
+- Persons already identified on business accounts (minimum 3 verified)
+- Public bodies and very large corporations
+- Mutual fund accounts (if dealer-verified)
+- Life insurance beneficiary deposits (meeting specific criteria)
+
+Other:
+- Exempt insurance policies
+- Registered plan accounts
+- Certain escrow accounts
+- Pension fund accounts
+- Group plan members (if sponsor verified)
+
+FIVE METHODS TO VERIFY PERSON IDENTITY
+
+1. Government-Issued Photo ID Method
+- Authentic, valid, and current document from federal, provincial, or territorial government
+- Must include name, photo, and unique identifier
+- Must match name and appearance of the person
+- For remote verification: technology can assess authenticity (scanning, facial recognition)
+
+2. Credit File Method
+- Valid, current information from Canadian credit bureaus (Equifax, TransUnion)
+- Credit file must exist for at least three years with multiple sources
+- Search must occur at verification time — prior copies unacceptable
+- Match name, address, and date of birth
+
+3. Dual-Process Method
+- Combines any two different reliable sources confirming: name and address, name and DOB, or name and financial account
+- Information must be valid and current
+- Cannot use same source twice
+- Acceptable sources: utility bills, government statements, bank documents, property assessments
+
+4. Affiliate or Member Method
+- Relies on prior verification by affiliated reporting entities or credit union members using methods 1–3
+- Verify that name, address, and DOB in affiliate records match information provided
+
+5. Reliance Method
+- Uses measures previously taken by another reporting entity or affiliated foreign entity
+- Requires written agreement
+- Must obtain information used for original verification
+- Information must remain valid and current
+
+THREE METHODS TO VERIFY ENTITY IDENTITY
+
+1. Confirmation of Existence Method
+- Corporations: Certificate of incorporation, annual securities filings, or active status documents
+- Other Entities: Partnership agreements, articles of association, or existence confirmation records
+- All documents must be authentic, valid, and current
+
+2. Reliance Method
+- Previous verification by another reporting entity or affiliated foreign entity
+- Written agreement required
+
+3. Simplified Identification Method
+- Available only when risk assessment confirms low ML/TF risk
+- Applies to: other reporting entities, foreign equivalents, regulated pension funds, publicly traded corporations, subsidiaries, foreign government institutions, public service bodies
+
+ELECTRONIC VERIFICATION OPTIONS
+For remote government ID verification, entities may:
+- Use technology comparing document features against known characteristics
+- Deploy facial recognition comparing applicant "selfie" to ID photo
+- Conduct live video sessions comparing applicant to document
+Process requirements must address authenticity determination and validity/currency confirmation.
+
+RECORD KEEPING REQUIREMENTS
+Photo ID: name, verification date, document type, number, jurisdiction, expiry
+Credit File: name, search date, bureau/vendor name, file number
+Dual-Process: name, verification date, two source names, information types, account/reference numbers
+Entity Methods: registration numbers, document types, sources, or paper copies
+
+DISTINCTION: VERIFICATION vs ONGOING MONITORING
+Initial verification uses prescribed methods above.
+Keeping client identification current is an ongoing monitoring obligation — does not require re-verification using prescribed methods.
+
+CANADA vs USA COMPARISON NOTE
+Canada (FINTRAC): Prescribes 5 specific methods for individual verification; 3 for entities.
+USA (BSA/FinCEN CDD Rule): Requires "reasonable procedures" for verifying identity; prescribes a risk-based approach without specifying exact methods.
+
+Key differences:
+- Canada has a more prescriptive verification framework
+- US Customer Identification Program (CIP) rules (31 CFR 1020.220) require name, DOB, address, and ID number — but method of verification is more flexible
+- Both require beneficial ownership verification for entities (25% ownership threshold)
+- Canada requires verification for EFTs at $1,000+ CAD; US requires CIP at account opening (not per-transaction)

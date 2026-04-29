@@ -1,0 +1,391 @@
+{
+  "activity deviation (ach)": {
+    "name": "Activity Deviation (ACH)",
+    "current": "Monthly Outgoing ACH >= $50K AND >= 5 std dev above 12-month profile mean",
+    "sweep_params": {
+      "floor_amount": {
+        "col": "trigger_amt",
+        "label": "monthly ACH floor ($)",
+        "current": 50000,
+        "direction": "gte",
+        "sweep_min": 10000,
+        "desc": "Minimum monthly Outgoing ACH sum to trigger (currently $50K)"
+      },
+      "z_threshold": {
+        "col": "z_score",
+        "label": "std dev multiplier",
+        "current": 5.0,
+        "direction": "gte",
+        "sweep_min": 0.0,
+        "integer_axis": true,
+        "desc": "Std-dev multiplier above 12-month ACH profile mean (currently 5)"
+      }
+    },
+    "default_sweep": "floor_amount",
+    "default_2d": ["floor_amount", "z_threshold"]
+  },
+  "activity deviation (check)": {
+    "name": "Activity Deviation (Check)",
+    "current": "Monthly Outgoing Check >= $50K AND >= 2 std dev above 12-month profile mean",
+    "sweep_params": {
+      "floor_amount": {
+        "col": "trigger_amt",
+        "label": "monthly Check floor ($)",
+        "current": 50000,
+        "direction": "gte",
+        "sweep_min": 10000,
+        "desc": "Minimum monthly Outgoing Check sum to trigger (currently $50K)"
+      },
+      "z_threshold": {
+        "col": "z_score",
+        "label": "std dev multiplier",
+        "current": 2.0,
+        "direction": "gte",
+        "sweep_min": 0.0,
+        "integer_axis": true,
+        "desc": "Std-dev multiplier above 12-month Check profile mean (currently 2)"
+      }
+    },
+    "default_sweep": "floor_amount",
+    "default_2d": ["floor_amount", "z_threshold"]
+  },
+  "elder abuse": {
+    "name": "Elder Abuse",
+    "current": "Age >= 60 AND 14-day outgoing >= $5K AND >= 3 std dev above 90-day mean",
+    "sweep_params": {
+      "floor_amount": {
+        "col": "trigger_amt",
+        "label": "14-day outgoing floor ($)",
+        "current": 5000,
+        "direction": "gte",
+        "sweep_min": 500,
+        "desc": "Minimum 14-day aggregated outgoing to trigger (currently $5K)"
+      },
+      "z_threshold": {
+        "col": "z_score",
+        "label": "std dev multiplier",
+        "current": 3.0,
+        "direction": "gte",
+        "sweep_min": 0.0,
+        "integer_axis": true,
+        "desc": "Std-dev multiplier above 90-day mean (currently 3)"
+      },
+      "age_threshold": {
+        "col": "age",
+        "label": "minimum age (years)",
+        "current": 60,
+        "direction": "gte",
+        "sweep_min": 50,
+        "integer_axis": true,
+        "desc": "Minimum customer age to trigger (currently 60)"
+      }
+    },
+    "default_sweep": "z_threshold",
+    "default_2d": ["floor_amount", "age_threshold"]
+  },
+  "velocity single": {
+    "name": "Velocity Single",
+    "current": ">=1 pair (in+out) within 14 days, out=90-110% of in, pair total >= $20K",
+    "sweep_params": {
+      "pair_total": {
+        "col": "pair_total",
+        "label": "pair total ($)",
+        "current": 20000,
+        "direction": "gte",
+        "sweep_min": 5000,
+        "desc": "Minimum combined in+out pair total to trigger (currently $20K)"
+      },
+      "ratio_tolerance": {
+        "col": "ratio",
+        "label": "ratio tolerance",
+        "current": 0.10,
+        "direction": "abs_lte",
+        "format_pct": true,
+        "values": [0.0, 0.025, 0.05, 0.075, 0.10, 0.125, 0.15, 0.175, 0.20],
+        "desc": "Max deviation of out/in ratio from 1.0 to trigger (currently 10% = 90-110%)"
+      }
+    },
+    "default_sweep": "pair_total",
+    "default_2d": ["pair_total", "ratio_tolerance"]
+  },
+  "detect excessive": {
+    "name": "Detect Excessive Transaction Activity",
+    "current": "5-day incoming Cash+Check sum > $10K",
+    "sweep_params": {
+      "floor_amount": {
+        "col": "trigger_amt",
+        "label": "sum threshold ($)",
+        "current": 10000,
+        "direction": "gte",
+        "sweep_min": 2000,
+        "desc": "Minimum N-day incoming Cash+Check sum to trigger (currently $10K over 5 days)"
+      },
+      "time_window": {
+        "col": null,
+        "label": "time window (days)",
+        "current": 5,
+        "direction": "window",
+        "values": [3, 5, 7, 10, 14],
+        "desc": "Aggregation window in days (currently 5 days); options: 3, 5, 7, 10, 14"
+      }
+    },
+    "default_sweep": "floor_amount",
+    "default_2d": ["floor_amount", "time_window"]
+  },
+  "structuring (incoming cash)": {
+    "name": "Structuring (Incoming Cash)",
+    "current": "3 qualifying days within 14-day window, each day's Cash CashIn total $3K-$40K",
+    "sweep_params": {
+      "daily_floor": {
+        "col": "trigger_amt",
+        "label": "min daily Cash amount ($)",
+        "current": 3000,
+        "direction": "gte",
+        "sweep_min": 500,
+        "desc": "Minimum daily Cash CashIn total for a qualifying day (currently $3K)"
+      },
+      "days_required": {
+        "col": "days_observed",
+        "label": "qualifying days required",
+        "current": 3,
+        "direction": "gte",
+        "sweep_min": 1,
+        "integer_axis": true,
+        "desc": "Minimum number of qualifying days in the window (currently 3)"
+      }
+    },
+    "default_sweep": "daily_floor",
+    "default_2d": ["daily_floor", "days_required"]
+  },
+  "structuring (outgoing cash)": {
+    "name": "Structuring (Outgoing Cash)",
+    "current": "3 qualifying days within 14-day window, each day's Cash CashOut total $7K-$30K",
+    "sweep_params": {
+      "daily_floor": {
+        "col": "trigger_amt",
+        "label": "min daily Cash amount ($)",
+        "current": 7000,
+        "direction": "gte",
+        "sweep_min": 1000,
+        "desc": "Minimum daily Cash CashOut total for a qualifying day (currently $7K)"
+      },
+      "days_required": {
+        "col": "days_observed",
+        "label": "qualifying days required",
+        "current": 3,
+        "direction": "gte",
+        "sweep_min": 1,
+        "integer_axis": true,
+        "desc": "Minimum number of qualifying days in the window (currently 3)"
+      }
+    },
+    "default_sweep": "daily_floor",
+    "default_2d": ["daily_floor", "days_required"]
+  },
+  "ctr client": {
+    "name": "CTR Client",
+    "current": "Cash + Currency Exchange in/out total > $10K",
+    "sweep_params": {
+      "floor_amount": {
+        "col": "trigger_amt",
+        "label": "total Cash threshold ($)",
+        "current": 10000,
+        "direction": "gte",
+        "sweep_min": 5000,
+        "desc": "Minimum Cash/Currency Exchange total to trigger (currently $10K)"
+      }
+    },
+    "default_sweep": "floor_amount",
+    "default_2d": ["floor_amount", "floor_amount"]
+  },
+  "burst in originator activity": {
+    "name": "Burst in Originator Activity",
+    "current": "5-day Incoming Wire/ACH sum >= $5K, >= 3 transactions, >= 2 distinct counterparties",
+    "sweep_params": {
+      "floor_amount": {
+        "col": "trigger_amt",
+        "label": "5-day incoming sum ($)",
+        "current": 5000,
+        "direction": "gte",
+        "sweep_min": 1000,
+        "desc": "Minimum 5-day incoming Wire/ACH sum to trigger (currently $5K)"
+      },
+      "min_transactions": {
+        "col": "txn_count",
+        "label": "minimum transaction count",
+        "current": 3,
+        "direction": "gte",
+        "sweep_min": 1,
+        "integer_axis": true,
+        "desc": "Minimum number of transactions in the 5-day window (currently 3)"
+      }
+    },
+    "default_sweep": "floor_amount",
+    "default_2d": ["floor_amount", "min_transactions"]
+  },
+  "burst in beneficiary activity": {
+    "name": "Burst in Beneficiary Activity",
+    "current": "5-day Outgoing Wire/ACH sum >= $5K, >= 3 transactions, >= 2 distinct counterparties",
+    "sweep_params": {
+      "floor_amount": {
+        "col": "trigger_amt",
+        "label": "5-day outgoing sum ($)",
+        "current": 5000,
+        "direction": "gte",
+        "sweep_min": 1000,
+        "desc": "Minimum 5-day outgoing Wire/ACH sum to trigger (currently $5K)"
+      },
+      "min_transactions": {
+        "col": "txn_count",
+        "label": "minimum transaction count",
+        "current": 3,
+        "direction": "gte",
+        "sweep_min": 1,
+        "integer_axis": true,
+        "desc": "Minimum number of transactions in the 5-day window (currently 3)"
+      }
+    },
+    "default_sweep": "floor_amount",
+    "default_2d": ["floor_amount", "min_transactions"]
+  },
+  "risky international transfer": {
+    "name": "Risky International Transfer",
+    "current": "Single Wire to/from medium-risk country >= $300K or >= $500K",
+    "sweep_params": {
+      "floor_amount": {
+        "col": "trigger_amt",
+        "label": "single Wire floor ($)",
+        "current": 300000,
+        "direction": "gte",
+        "sweep_min": 100000,
+        "desc": "Minimum single Wire amount to a risky country to trigger (currently $300K)"
+      }
+    },
+    "default_sweep": "floor_amount",
+    "default_2d": ["floor_amount", "floor_amount"]
+  },
+  "activity deviation (wire)": {
+    "name": "Activity Deviation (Wire)",
+    "current": "Monthly Outgoing Wire >= $100K AND >= 4 std dev above 12-month profile mean",
+    "sweep_params": {
+      "floor_amount": {
+        "col": "trigger_amt",
+        "label": "monthly Wire floor ($)",
+        "current": 100000,
+        "direction": "gte",
+        "sweep_min": 25000,
+        "desc": "Minimum monthly Outgoing Wire sum to trigger (currently $100K)"
+      },
+      "z_threshold": {
+        "col": "z_score",
+        "label": "std dev multiplier",
+        "current": 4.0,
+        "direction": "gte",
+        "sweep_min": 0.0,
+        "integer_axis": true,
+        "desc": "Std-dev multiplier above 12-month Wire profile mean (currently 4)"
+      }
+    },
+    "default_sweep": "floor_amount",
+    "default_2d": ["floor_amount", "z_threshold"]
+  },
+  "velocity multiple": {
+    "name": "Velocity Multiple",
+    "current": "1 large CashIn within 14 days followed by >= 3 CashOuts to distinct counterparties, total >= $30K",
+    "sweep_params": {
+      "pair_total": {
+        "col": "pair_total",
+        "label": "total in+out amount ($)",
+        "current": 30000,
+        "direction": "gte",
+        "sweep_min": 10000,
+        "desc": "Minimum combined CashIn+CashOut total to trigger (currently $30K)"
+      },
+      "min_counterparties": {
+        "col": "txn_count",
+        "label": "minimum distinct counterparties",
+        "current": 3,
+        "direction": "gte",
+        "sweep_min": 2,
+        "integer_axis": true,
+        "desc": "Minimum number of distinct outgoing counterparties (currently 3)"
+      }
+    },
+    "default_sweep": "pair_total",
+    "default_2d": ["pair_total", "min_counterparties"]
+  },
+  "funnel account": {
+    "name": "Funnel Account",
+    "current": ">= 5 small inflows from distinct counterparties followed by 1 large outflow within 30 days",
+    "sweep_params": {
+      "floor_amount": {
+        "col": "trigger_amt",
+        "label": "total inflow floor ($)",
+        "current": 10000,
+        "direction": "gte",
+        "sweep_min": 2000,
+        "desc": "Minimum total inflow amount across all counterparties (currently $10K)"
+      },
+      "min_counterparties": {
+        "col": "txn_count",
+        "label": "minimum distinct inflow counterparties",
+        "current": 5,
+        "direction": "gte",
+        "sweep_min": 2,
+        "integer_axis": true,
+        "desc": "Minimum number of distinct inflow sources (currently 5)"
+      }
+    },
+    "default_sweep": "floor_amount",
+    "default_2d": ["floor_amount", "min_counterparties"]
+  },
+  "round-trip": {
+    "name": "Round-trip",
+    "current": "Outgoing Wire >= $50K returned within 30 days to same or related customer account (net <= 5% difference)",
+    "sweep_params": {
+      "floor_amount": {
+        "col": "trigger_amt",
+        "label": "round-trip Wire floor ($)",
+        "current": 50000,
+        "direction": "gte",
+        "sweep_min": 10000,
+        "desc": "Minimum Wire amount for the outgoing leg to trigger (currently $50K)"
+      },
+      "return_window": {
+        "col": null,
+        "label": "return window (days)",
+        "current": 30,
+        "direction": "window",
+        "values": [7, 14, 21, 30, 45, 60],
+        "desc": "Maximum days between outgoing and return leg (currently 30 days)"
+      }
+    },
+    "default_sweep": "floor_amount",
+    "default_2d": ["floor_amount", "return_window"]
+  },
+  "human trafficking indicators": {
+    "name": "Human Trafficking Indicators",
+    "current": "Daily Cash CashIn >= $200 for >= 14 consecutive days AND >= 1 hospitality/transport payment per day",
+    "sweep_params": {
+      "floor_amount": {
+        "col": "trigger_amt",
+        "label": "total cash inflow floor ($)",
+        "current": 3000,
+        "direction": "gte",
+        "sweep_min": 500,
+        "desc": "Minimum total cash inflow over the observation window (currently $3K)"
+      },
+      "days_required": {
+        "col": "days_observed",
+        "label": "minimum consecutive days",
+        "current": 14,
+        "direction": "gte",
+        "sweep_min": 5,
+        "integer_axis": true,
+        "desc": "Minimum number of days with qualifying cash activity (currently 14)"
+      }
+    },
+    "default_sweep": "floor_amount",
+    "default_2d": ["floor_amount", "days_required"]
+  }
+}

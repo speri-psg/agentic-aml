@@ -1,0 +1,14 @@
+dash
+dash-bootstrap-components
+dash-chat
+flask
+pandas
+numpy
+plotly
+scikit-learn
+openai>=1.0.0
+chromadb
+sentence-transformers
+pypdf[crypto]
+rapidfuzz
+jellyfish

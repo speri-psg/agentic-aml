@@ -1,0 +1,103 @@
+FINTRAC Guidance: Reporting Suspicious Transactions (STRs)
+Source: https://fintrac-canafe.canada.ca/guidance-directives/transaction-operation/str-dod/str-dod-eng
+Effective: June 1, 2021 (updated 2024)
+
+CORE REQUIREMENT
+All reporting entities must submit Suspicious Transaction Reports (STRs) to FINTRAC "as soon as practicable" after establishing reasonable grounds to suspect money laundering or terrorist financing. No monetary threshold applies.
+
+KEY DEFINITIONS
+
+Reasonable Grounds to Suspect: A threshold above "gut feeling" but below "reasonable grounds to believe." Requires considering facts, context, and relevant indicators to conclude a possibility exists that an offense occurred — without needing verification or proof.
+
+Facts: Events, actions, or occurrences that exist or are known to have happened (not opinions).
+
+Context: Information clarifying circumstances or explaining situations, derived from business awareness, client knowledge, and risk assessments.
+
+As Soon as Practicable: After completing measures establishing the suspicion threshold, submission must be treated as a priority. Delays require justification.
+
+WHO MUST REPORT
+- All reporting entities and their employees
+- Employees only if employers fail to report (rare)
+- Service providers may submit on behalf of entities, but legal responsibility cannot be delegated
+
+WHAT TRIGGERS REPORTING
+Report when suspicion relates to:
+- Money laundering offenses (including attempts)
+- Terrorist activity financing offenses (including attempts)
+- Sanctions evasion (when applicable)
+
+CONFIDENTIALITY PROTECTION
+"No person or entity will be prosecuted for sending a Suspicious Transaction Report in good faith."
+You cannot inform clients of report contents or that reporting occurred if this prejudices investigations.
+
+SUBMISSION METHODS
+Electronic (mandatory if technically capable):
+- FINTRAC Web Reporting System (FWR)
+- FINTRAC API (available April 8, 2024 onward)
+
+Paper (only if lacking technical capability):
+- Fax: 1-866-226-2346
+- Mail: FINTRAC, 234 Laurier Avenue West, 24th floor, Ottawa, ON K1P 1H7
+
+REPORT STRUCTURE (six sections)
+1. General Information: Business details, reference numbers
+2. Transaction Information: Status, date, time, method, location, purpose
+3. Starting Action: Direction (in/out), fund types, amounts, sources, conductor details
+4. Completing Action: Disposition, amounts, beneficiary information
+5. Details of Suspicion: Narrative explaining facts, context, and indicators supporting suspicion
+6. Action Taken: Description of responses taken
+
+Each report can contain multiple transactions with multiple starting/completing actions.
+
+MANDATORY CONTENT STANDARDS
+Reports must include:
+- All parties' identifying information (conductors, third parties, beneficiaries, account holders)
+- Transaction specifics (dates, times, amounts, methods)
+- For entities: ownership, control, director, and beneficial owner information
+- Clear explanation linking facts and indicators to the suspicion threshold
+- Plain language — no organizational jargon or internal acronyms
+
+What to Include:
+- All email addresses, phone numbers, aliases, and identifiers
+- Account numbers, virtual currency addresses, and reference numbers
+- Relationships between parties
+- Source of funds information
+- Beneficial ownership details
+
+What to Avoid:
+- Using "reasonable grounds to believe" (higher standard than required)
+- Omitting available party information from structured fields
+- Summarizing transactions only in narrative sections
+- Vague suspicion explanations lacking fact-to-indicator connections
+
+TIMING AND CHANGES
+Submit within reasonable timeframe after assessment completion.
+To modify a submitted report: provide explanation and resubmit within 20 days of change request.
+
+ADDITIONAL SIMULTANEOUS OBLIGATIONS
+When suspicious transactions involve reportable amounts, also submit where applicable:
+- Large Cash Transaction Reports (LCTR)
+- Electronic Funds Transfer Reports (EFT)
+- Large Virtual Currency Transaction Reports (LVCTR)
+- Casino Disbursement Reports
+- Listed Person/Entity Property Reports
+
+RECORD RETENTION
+Keep copies of submitted STRs for minimum 5 years from submission date.
+
+QUALITY EXPECTATIONS
+FINTRAC evaluates every STR received. Reports related to national security threats receive expedited 24-hour analysis.
+Quality assessments address:
+- Consistency in detection and submission practices
+- Timeliness of reporting post-assessment
+- Information completeness and accuracy
+- KYC data integrity
+
+SUBSEQUENT REPORTING
+Continue submitting STRs for the same person/entity as long as suspicion persists.
+Reference prior reports by including reporting entity reference numbers and transaction reference numbers, noting new facts or indicators identified.
+
+CANADA vs USA COMPARISON NOTE
+Canada uses STRs (Suspicious Transaction Reports); the US equivalent is SARs (Suspicious Activity Reports).
+Key difference: Canada has no dollar threshold for STR filing — any suspicious transaction regardless of amount must be reported.
+US SARs have minimum thresholds ($5,000 for banks under BSA).

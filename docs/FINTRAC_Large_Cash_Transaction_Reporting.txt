@@ -1,0 +1,97 @@
+FINTRAC Guidance: Reporting Large Cash Transactions (LCTRs)
+Source: https://fintrac-canafe.canada.ca/guidance-directives/transaction-operation/lctr-doie/lctr-doie-eng
+Effective: June 1, 2021
+
+REPORTING THRESHOLD
+A large cash transaction occurs when a reporting entity receives $10,000 CAD or more in cash in a single transaction.
+"Cash" includes: coins and bank notes (Canadian and foreign), and fiat currency.
+"Cash" excludes: cheques, money orders, and virtual currency.
+
+SUBMISSION TIMELINE
+Reports must be submitted to FINTRAC within 15 calendar days after receiving the cash.
+
+THE 24-HOUR AGGREGATION RULE
+Entities must report when they receive two or more cash amounts totaling $10,000+ within a consecutive 24-hour window if they know the transactions are:
+- Conducted by the same person or entity
+- Conducted on behalf of the same third party, or
+- For the same beneficiary
+
+FOREIGN CURRENCY CONVERSION
+Use exchange rates published by the Bank of Canada at transaction time.
+If Bank of Canada rate unavailable, apply the rate established in normal business operations, documented in compliance policies.
+
+SUBMISSION METHODS
+Reports must be submitted electronically via:
+- FINTRAC Web Reporting System (FWR)
+- FINTRAC API report submission
+Paper forms permitted only when electronic submission is technically infeasible.
+
+KEY EXEMPTIONS
+No reporting required for cash received from:
+- Financial entities
+- Public bodies
+- Persons acting on behalf of such entities
+
+Life insurance companies have additional exemptions for:
+- Reinsurance
+- Registered annuities
+- Reverse mortgages
+
+REQUIRED INFORMATION CATEGORIES
+
+General Information:
+- Reporting entity number and location
+- Aggregation type (conductor, third party, or beneficiary)
+- 24-hour period dates/times with time zones
+
+Transaction Details:
+- Date, time, and method
+- Purpose and threshold indicator
+- Location where transaction occurred
+
+Starting Action:
+- Cash amount and currency
+- Source of cash information
+- Conductor details (person or entity)
+- Third party information if applicable
+
+Completing Action:
+- Disposition type (deposit, exchange, transfer, investment, etc.)
+- Amount and currency
+- Account information
+- Beneficiary details
+- Other involved parties
+
+FIELD DESIGNATIONS
+- Mandatory (marked with *)
+- Mandatory for processing (marked with ‡)
+- Mandatory if applicable (marked with †)
+- Reasonable measures (non-mandatory fields requiring good-faith effort)
+
+IDENTITY VERIFICATION REQUIREMENTS
+Entities must verify identity of the person or entity conducting the transaction using FINTRAC-prescribed documentation methods (see separate identity verification guidance).
+
+RECORD RETENTION
+Copies of submitted reports must be retained for at least 5 years from creation date.
+
+RELATED OBLIGATIONS
+Entities may need to simultaneously file:
+- Suspicious Transaction Reports if money laundering indicators exist
+- Electronic Funds Transfer Reports if dispositions involve reportable transfers
+
+COMPLIANCE PROGRAM REQUIREMENTS
+Policies must document processes for:
+- Exchange rate selection and sources
+- Transaction aggregation methodology
+- Entity vs. person determination
+- Report submission procedures
+- Staff training on AML/CFT activities
+
+CANADA vs USA COMPARISON NOTE
+Canada: LCTR threshold = $10,000 CAD, filed within 15 calendar days.
+USA: CTR (Currency Transaction Report) threshold = $10,000 USD, filed within 15 calendar days.
+Key differences:
+- Canada has no exemption program equivalent to the US CTR Exemptions (Phase I/Phase II)
+- Every transaction over $10K CAD must be reported regardless of customer type
+- US allows banks to exempt certain "non-listed" business customers from CTR filing
+- Canada's 24-hour aggregation rule mirrors the US "structuring" aggregation concept
