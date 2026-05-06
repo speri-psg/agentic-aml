@@ -1,0 +1,2 @@
+docs/ss_segmentation_data.csv filter=lfs diff=lfs merge=lfs -text
+docs/customer_cluster_labels.csv filter=lfs diff=lfs merge=lfs -text

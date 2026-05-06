@@ -11,6 +11,21 @@ from openai import OpenAI
 # Global stop event — set this to interrupt any running agent loop
 stop_event = threading.Event()
 
+
+def _strip_thinking(text: str) -> str:
+    """Strip Gemma 4 'Thinking Process:' chain-of-thought preamble."""
+    if not text.startswith("Thinking Process:"):
+        return text
+    lines = text.splitlines()
+    last_num_idx = -1
+    for i, line in enumerate(lines):
+        if re.match(r"^\d+\.", line.strip()):
+            last_num_idx = i
+    if last_num_idx == -1:
+        return "\n".join(lines[1:]).strip()
+    answer = "\n".join(lines[last_num_idx + 1:]).strip()
+    return answer if answer else text
+
 # Sentinel raised by _stream_llm when stop_event fires mid-stream
 class _Stopped(Exception):
     pass
@@ -283,17 +298,17 @@ class BaseAgent:
             tool_calls.append(SimpleNamespace(id=tc["id"] or f"tc_{i}", function=fn))
         return SimpleNamespace(content=content, tool_calls=tool_calls if tool_calls else None)
 
-    def run(self, query: str, tool_executor, policy_context: str = "") -> tuple:
+    def run(self, query: str, tool_executor, policy_context: str = "", history: list = None) -> tuple:
         """
         Agentic loop. Calls tools until the model returns a final text response.
         Returns: (response_text, [(tool_name, tool_input, fig), ...])
         """
         user_content = f"{policy_context}\n\n{query}".strip() if policy_context else query
 
-        messages = [
-            {"role": "system", "content": self.system_prompt},
-            {"role": "user", "content": user_content},
-        ]
+        messages = [{"role": "system", "content": self.system_prompt}]
+        if history:
+            messages.extend(history)
+        messages.append({"role": "user", "content": user_content})
         chart_results = []
         tool_call_count = 0
 
@@ -371,6 +386,11 @@ class BaseAgent:
                 if len(deduped) < len(structured_calls):
                     print(f"[{self.name}] deduplicated {len(structured_calls) - len(deduped)} duplicate tool call(s)")
                 structured_calls = deduped
+                # When max_tool_calls=1, enforce single tool per response to prevent
+                # spurious parallel calls contaminating chart results with stale data
+                if self.max_tool_calls == 1 and len(structured_calls) > 1:
+                    print(f"[{self.name}] capping to 1 tool call (was {len(structured_calls)}): keeping {structured_calls[0][0]}")
+                    structured_calls = structured_calls[:1]
                 for name, args, tc_id in structured_calls:
                     print(f"[{self.name}] tool call: {name}({args})")
                     result_text, fig = tool_executor(name, args)
@@ -392,10 +412,23 @@ class BaseAgent:
                     create_kwargs.pop("tools", None)
                     create_kwargs.pop("tool_choice", None)
 
+                # ── DEBUG: log messages sent to model after tool call ─────────
+                print(f"\n[{self.name}] DEBUG — messages sent to model after tool call #{tool_call_count}:")
+                for i, m in enumerate(messages):
+                    role = m.get("role", "?")
+                    content = m.get("content") or ""
+                    tc = m.get("tool_calls")
+                    preview = content[:300].replace("\n", "↵") if content else "(no content)"
+                    if tc:
+                        print(f"  [{i}] {role}: [tool_calls={[t['function']['name'] for t in tc]}] {preview}")
+                    else:
+                        print(f"  [{i}] {role}: {preview}")
+                print(f"[{self.name}] DEBUG — end messages\n")
+
             else:
                 # No tool call found — final text response
-                return msg.content or "", chart_results
+                return _strip_thinking(msg.content or ""), chart_results
 
         # Exceeded max iterations — return whatever text we have
         print(f"[{self.name}] WARNING: hit MAX_TOOL_ITERATIONS ({MAX_TOOL_ITERATIONS})")
-        return msg.content or "[No response after max tool iterations]", chart_results
+        return _strip_thinking(msg.content or "[No response after max tool iterations]"), chart_results

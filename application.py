@@ -68,6 +68,8 @@ DF_BUSINESS  = DF[DF["dynamic_segment"] == 0]
 DF_INDIVIDUAL= DF[DF["dynamic_segment"] == 1]
 
 DF_SS  = pd.read_csv(DS_CSV) if os.path.exists(DS_CSV) else None
+if DF_SS is not None and "dynamic_segment" not in DF_SS.columns:
+    DF_SS["dynamic_segment"] = DF_SS["customer_type"].str.upper().map({"BUSINESS": 0, "INDIVIDUAL": 1})
 DF_SAR = pd.read_csv(SAR_CSV) if os.path.exists(SAR_CSV) else None
 if DF_SAR is not None and "dynamic_segment" not in DF_SAR.columns:
     DF_SAR["dynamic_segment"] = DF_SAR["customer_type"].map({"BUSINESS": 0, "INDIVIDUAL": 1})
@@ -103,8 +105,8 @@ DF_SAR_INDIVIDUAL  = DF_SAR[DF_SAR["dynamic_segment"] == 1] if DF_SAR is not Non
 _total      = len(DF)
 _biz_count  = len(DF_BUSINESS)
 _ind_count  = len(DF_INDIVIDUAL)
-_alert_count= int(DF["alerts"].sum())
-_fp_count   = int(DF["false_positives"].sum())
+_alert_count= int(pd.to_numeric(DF["alerts"],        errors="coerce").sum())
+_fp_count   = int(pd.to_numeric(DF["false_positives"], errors="coerce").sum())
 print(f"Alerts data: {_total:,} rows | Business={_biz_count:,} Individual={_ind_count:,}")
 print(f"SS data: {'loaded (' + str(len(DF_SS)) + ' rows)' if DF_SS is not None else 'not found — run python ds_data_prep.py'}")
 _sar_status = (f"loaded ({len(DF_SAR)} rows, {int(DF_SAR['is_sar'].sum())} SARs)" if DF_SAR is not None else "not found - run python simulate_sars.py")
@@ -771,10 +773,10 @@ def tool_executor(tool_name, tool_input):
                 DF_RULE_SWEEP, DF_CLUSTER_LABELS, grid["rf_name"] if grid else risk_factor, cluster
             )
             if dist_fig is not None:
-                figs = [f for f in [heatmap, ranked_tbl, dist_fig] if f is not None]
-                return text, tuple(figs)
-        figs = [f for f in [heatmap, ranked_tbl] if f is not None]
-        return text, tuple(figs) if len(figs) > 1 else (figs[0] if figs else None)
+                figs = [f for f in [ranked_tbl, dist_fig] if f is not None]
+                return text, tuple(figs) if len(figs) > 1 else (figs[0] if figs else None)
+        # Heatmap lives in the side panel -- only show ranked table in chat
+        return text, ranked_tbl
 
     elif tool_name == "cluster_rule_summary":
         if DF_RULE_SWEEP is None:
@@ -811,7 +813,7 @@ def tool_executor(tool_name, tool_input):
 
     elif tool_name == "cluster_analysis":
         customer_type = tool_input.get("customer_type", "All")
-        n_clusters    = tool_input.get("n_clusters", 4)
+        n_clusters    = max(2, min(6, int(tool_input.get("n_clusters", 4))))
         df_src        = DF_SS if DF_SS is not None else DF
         scatter_fig, stats, df_clustered = lambda_ds_performance.perform_clustering(
             df_src, customer_type, n_clusters
@@ -848,15 +850,19 @@ def tool_executor(tool_name, tool_input):
             print("ds_cluster_analysis: DF_SS not loaded — running prepare_data() first ...")
             DF_SS = ds_data_prep.prepare_data()
         customer_type   = tool_input.get("customer_type", "All")
-        n_clusters      = tool_input.get("n_clusters", 4)
+        n_clusters      = max(2, min(6, int(tool_input.get("n_clusters", 4))))
         filter_clusters = tool_input.get("filter_clusters", None)
 
-        # GAP-1 patch disabled for V2 testing
-        # _n_match = re.search(r'\b([2-8])\s*clusters?\b', _current_query, re.IGNORECASE)
-        # if not _n_match:
-        #     _n_match = re.search(r'\binto\s+([2-8])\b', _current_query, re.IGNORECASE)
-        # if _n_match:
-        #     n_clusters = int(_n_match.group(1))
+        # If the user didn't mention a specific cluster count, ignore the model's choice and use 4.
+        _n_match = re.search(r'\b([2-8])\s*clusters?\b', _current_query, re.IGNORECASE)
+        if not _n_match:
+            _n_match = re.search(r'\binto\s+([2-8])\b', _current_query, re.IGNORECASE)
+        if not _n_match:
+            _n_match = re.search(r'\bonly\s+([2-8])\b', _current_query, re.IGNORECASE)
+        if _n_match:
+            n_clusters = max(2, min(6, int(_n_match.group(1))))
+        else:
+            n_clusters = 4  # user didn't specify — always default to 4
 
         if filter_clusters and _cluster_cache:
             # Second call: use cached data, skip re-clustering
@@ -976,8 +982,16 @@ def _compact_chart_figures(messages, keep_last_n=1):
 
 # ── Chart content builder ─────────────────────────────────────────────────────
 def _chart_content(tool_name, tool_input, fig):
-    """Convert a tool result figure into dash-chat content blocks."""
+    """Convert a tool result into (message_blocks, chart_list).
+
+    message_blocks: text-only content for the messages prop — NO Plotly JSON.
+                    Keeping figure dicts out of messages eliminates React
+                    reconciliation lag on every keystroke.
+    chart_list:     [{"title": str, "figure": dict, "height": int}] passed to
+                    charts-panel-store and rendered by render_charts_panel().
+    """
     blocks = []
+    chart_list = []
 
     if tool_name == "threshold_tuning":
         seg = tool_input.get("segment", "")
@@ -1017,7 +1031,6 @@ def _chart_content(tool_name, tool_input, fig):
         cluster_tag = f" [Cluster {cluster}]" if cluster else ""
         if isinstance(fig, tuple):
             figs = list(fig)
-            # Label each figure by type: heatmap, ranked table, cluster dist
             base_labels = [
                 f"2D Sweep Heatmap — {rf}{cluster_tag}",
                 f"2D Sweep Ranked Table — {rf}{cluster_tag}",
@@ -1042,30 +1055,25 @@ def _chart_content(tool_name, tool_input, fig):
         labels = [f"Rule SAR Sweep — {rf} / {sp or 'default'}{cluster_tag}"]
 
     elif tool_name == "ofac_screening":
-        fig_h = fig.layout.height if (fig is not None and fig.layout.height) else 400
-        blocks.append({
-            "type": "graph",
-            "props": {
-                "figure": fig.to_dict() if fig is not None else {},
-                "config": {"responsive": True},
-                "style":  {"height": f"{fig_h}px", "width": "100%"},
-            },
-        })
-        return blocks
+        title = "OFAC Sanctions Screening"
+        if fig is not None:
+            fig_h = fig.layout.height if fig.layout.height else 400
+            chart_list.append({"title": title, "figure": fig.to_dict(), "height": fig_h})
+        blocks.append({"type": "text", "text": f"**{title}** — chart shown below."})
+        return blocks, chart_list
 
     elif tool_name in ("cluster_analysis", "ds_cluster_analysis"):
         ct = tool_input.get("customer_type", "All")
         if isinstance(fig, tuple) and len(fig) == 3:
-            # (stats_table, scatter, treemap) — omit scatter; it lives in the offcanvas
-            figs   = [fig[0], fig[2]]
-            labels = [f"Cluster Summary — {ct}", f"Dynamic Segment Treemap — {ct}"]
+            figs   = [fig[0]]   # stats_table → charts panel
+            labels = [f"Cluster Summary — {ct}"]
         elif isinstance(fig, tuple):
-            # (scatter, treemap) — omit scatter
-            figs   = [fig[1]]
-            labels = [f"Dynamic Segment Treemap — {ct}"]
+            figs   = []
+            labels = []
         else:
             figs   = [fig]
             labels = [f"Cluster Analysis — {ct}"]
+        blocks.append({"type": "text", "text": "📊 Use **Segment Customer Drilldown** and **Cluster Scatter Plot** in the left sidebar to explore the segments interactively."})
 
     else:
         figs   = [fig] if not isinstance(fig, tuple) else list(fig)
@@ -1073,18 +1081,13 @@ def _chart_content(tool_name, tool_input, fig):
 
     for label, f in zip(labels, figs):
         if f is None:
-            continue  # skip figures that failed to generate
+            continue
         fig_h = f.layout.height if f.layout.height else 460
-        blocks.append({"type": "text", "text": f"**{label}**"})
-        blocks.append({
-            "type": "graph",
-            "props": {
-                "figure": f.to_dict(),
-                "config": {"responsive": True},
-                "style":  {"height": f"{fig_h}px", "width": "100%"},
-            },
-        })
-    return blocks
+        chart_list.append({"title": label, "figure": f.to_dict(), "height": fig_h})
+    if chart_list:
+        blocks.append({"type": "text", "text": "See chart/table below."})
+
+    return blocks, chart_list
 
 
 # ── Dash app ──────────────────────────────────────────────────────────────────
@@ -1216,14 +1219,14 @@ _sidebar = dbc.Card([
 ], className="h-100 overflow-auto", style={"fontSize": "0.85rem"})
 
 _chat_panel = html.Div([
-    ChatComponent(
-        id="chat-component",
-        messages=[],
-        class_name="AML AI",
-        assistant_bubble_style={"maxWidth": "100%", "width": "100%"},
-        supported_input_file_types=[".pdf", ".docx", ".doc", ".txt"],
-    ),
     html.Div([
+        ChatComponent(
+            id="chat-component",
+            messages=[],
+            class_name="AML AI",
+            assistant_bubble_style={"maxWidth": "100%", "width": "100%"},
+            supported_input_file_types=[".pdf", ".docx", ".doc", ".txt"],
+        ),
         dbc.Button(
             "Stop",
             id="stop-btn",
@@ -1232,12 +1235,24 @@ _chat_panel = html.Div([
             outline=True,
             style={"position": "absolute", "bottom": "70px", "right": "24px", "zIndex": 999, "opacity": 0.7},
         ),
-    ]),
-], id="chat-scroll-container", style={
+    ], id="chat-scroll-container", style={
+        "flex": "1",
+        "minHeight": "0",
+        "overflow": "auto",
+        "overscrollBehaviorY": "contain",
+        "position": "relative",
+    }),
+    # Charts rendered here — kept out of the messages prop entirely so
+    # React never reconciles large Plotly JSON on every keystroke.
+    html.Div(id="charts-panel", className="px-3 pb-2", style={
+        "overflow": "auto",
+        "maxHeight": "48vh",
+        "borderTop": "1px solid #dee2e6",
+    }),
+], style={
+    "display": "flex",
+    "flexDirection": "column",
     "height": "calc(100vh - 80px)",
-    "overflow": "auto",
-    "overscrollBehaviorY": "contain",
-    "position": "relative",
 })
 
 _about_panel = dbc.Collapse(
@@ -1293,8 +1308,10 @@ app.layout = dbc.Container([
     dcc.Store(id="pending-prompt", data=None),
     dcc.Store(id="scroll-dummy"),
     dcc.Store(id="last-2d-sweep-store", data=None),
+    dcc.Store(id="drilldown-heatmap-click-store", data=None),
     dcc.Store(id="treemap-store", data=None),
     dcc.Store(id="scatter-store", data=None),
+    dcc.Store(id="charts-panel-store", data=None),
     # One-shot interval to inject welcome message after page load
     dcc.Interval(id="welcome-interval", interval=300, max_intervals=1),
 
@@ -1306,11 +1323,7 @@ app.layout = dbc.Container([
         is_open=False,
         style={"width": "55vw"},
         children=[
-            dcc.Graph(
-                id="drilldown-heatmap",
-                config={"responsive": True},
-                style={"height": "380px"},
-            ),
+            html.Div(id="drilldown-heatmap", style={"overflowX": "auto"}),
             html.Hr(),
             html.Div(
                 "Run a 2D sweep, then click a cell above to see the customer breakdown.",
@@ -1486,6 +1499,7 @@ app.clientside_callback(
     Output("last-2d-sweep-store", "data"),
     Output("treemap-store", "data"),
     Output("scatter-store", "data"),
+    Output("charts-panel-store", "data"),
     Input("chat-component", "new_message"),
     Input("pending-prompt", "data"),
     State("chat-component", "messages"),
@@ -1511,10 +1525,10 @@ def handle_chat(new_message, pending_prompt, messages):
             query = content
         user_msg   = new_message
     else:
-        return no_update, no_update, no_update, no_update
+        return no_update, no_update, no_update, no_update, no_update
 
     if not query.strip() and not (isinstance(new_message, dict) and isinstance(new_message.get("content"), list)):
-        return no_update, no_update, no_update, no_update
+        return no_update, no_update, no_update, no_update, no_update
 
     updated = messages + [user_msg]
 
@@ -1546,7 +1560,7 @@ def handle_chat(new_message, pending_prompt, messages):
             ingest_msg = f"Could not index '{file_name}': {e}"
             # Upload failed — always return immediately, never fall through to agent
             bot_response = {"role": "assistant", "content": ingest_msg}
-            return _compact_chart_figures(updated + [bot_response])[-_MAX_CHAT_MESSAGES:], no_update, no_update, no_update
+            return (updated + [bot_response])[-_MAX_CHAT_MESSAGES:], no_update, no_update, no_update, no_update
 
         # If the user also typed a question alongside the file, continue to answer it.
         # Otherwise just confirm and return.
@@ -1556,7 +1570,7 @@ def handle_chat(new_message, pending_prompt, messages):
             ingest_confirmation = ingest_msg
         else:
             bot_response = {"role": "assistant", "content": ingest_msg}
-            return _compact_chart_figures(updated + [bot_response])[-_MAX_CHAT_MESSAGES:], no_update, no_update, no_update
+            return (updated + [bot_response])[-_MAX_CHAT_MESSAGES:], no_update, no_update, no_update, no_update
     else:
         ingest_confirmation = None
 
@@ -1580,7 +1594,7 @@ def handle_chat(new_message, pending_prompt, messages):
             "Try a prompt like: *'Show FP/FN trade-off for Business customers'* or *'Run SAR backtest for Activity Deviation ACH rule'*"
         )
         bot_response = {"role": "assistant", "content": help_text}
-        return _compact_chart_figures(updated + [bot_response])[-_MAX_CHAT_MESSAGES:], no_update, no_update, no_update
+        return (updated + [bot_response])[-_MAX_CHAT_MESSAGES:], no_update, no_update, no_update, no_update
 
     # Clear any stale stop signal from a previous button click before starting a new query
     _agent_stop_event.clear()
@@ -1602,12 +1616,27 @@ def handle_chat(new_message, pending_prompt, messages):
              if m.get("role") == "assistant" and _msg_text(m)),
             ""
         )
+        # Build conversation history: last 2 user+assistant pairs before current query.
+        # Truncate long messages so prior treemap/chart text doesn't flood the context.
+        _MAX_HIST_CHARS = 120
+        _history_raw = [
+            {"role": m["role"], "content": _msg_text(m)}
+            for m in messages[:-1]
+            if m.get("role") in ("user", "assistant") and _msg_text(m)
+        ]
+        history = [
+            {
+                "role": m["role"],
+                "content": m["content"][:_MAX_HIST_CHARS] + ("…" if len(m["content"]) > _MAX_HIST_CHARS else ""),
+            }
+            for m in _history_raw[-4:]  # last 4 = 2 user+assistant pairs
+        ]
         # If the user uploaded a document alongside a question, force policy agent
         # so the question is answered from the KB regardless of query keywords.
         if ingest_confirmation:
             agent_text, chart_results = orchestrator.policy_agent.run(query, tool_executor, upload_only=True)
         else:
-            agent_text, chart_results = orchestrator.run(query, tool_executor, last_assistant)
+            agent_text, chart_results = orchestrator.run(query, tool_executor, last_assistant, history)
         print(f"[app] raw agent_text ({len(agent_text or '')} chars): {repr((agent_text or '')[:300])}")
     except Exception as e:
         import traceback
@@ -1618,7 +1647,7 @@ def handle_chat(new_message, pending_prompt, messages):
         else:
             msg_text = f"Sorry, something went wrong: {e}"
         bot_response = {"role": "assistant", "content": msg_text}
-        return _compact_chart_figures(updated + [bot_response])[-_MAX_CHAT_MESSAGES:], no_update, no_update, no_update
+        return (updated + [bot_response])[-_MAX_CHAT_MESSAGES:], no_update, no_update, no_update, no_update
 
     # Parse DISPLAY_CLUSTERS directive and filter charts if present
     # Only honour the directive if the user actually asked to filter clusters
@@ -1653,6 +1682,7 @@ def handle_chat(new_message, pending_prompt, messages):
                               (filtered_scatter, treemap_fig))]
     # Strip DISPLAY_CLUSTERS line and PRE-COMPUTED ANALYSIS markers from displayed text
     agent_text = re.sub(r'<eos>', '', agent_text or "").strip()               # Gemma 4 leaks <eos> tokens (strip all)
+    agent_text = re.sub(r'\bEnd chunk\b\s*', '', agent_text).strip()          # leaked training artifact
     agent_text = re.sub(r'^The PRE-COMPUTED[^\n]*\n?', '', agent_text).strip()  # leaked instruction header
     agent_text = re.sub(r'\s*DISPLAY_CLUSTERS:[\d,\s]*', '', agent_text).strip()
     agent_text = re.sub(r'===.*?PRE-COMPUTED ANALYSIS.*?===\n?', '', agent_text).strip()
@@ -1716,6 +1746,10 @@ def handle_chat(new_message, pending_prompt, messages):
                 "false negative", " fn ", "most fn", "highest fn", "missed sar",
                 "miss sar", "low sar", "fewest sar", "low precision", "worst precision",
             ])
+            _sar_question = any(w in q_lower_lr for w in [
+                "highest sar", "most sar", "best sar", "top sar", "highest catch",
+                "most catches", "best catch", "most true positive", "highest true",
+            ])
             if _fn_question:
                 sar_by_rule = (
                     DF_RULE_SWEEP[DF_RULE_SWEEP["is_sar"] == 1]
@@ -1727,6 +1761,17 @@ def handle_chat(new_message, pending_prompt, messages):
                 if len(bottom3):
                     parts = [f"{rf} ({sar:,} SAR caught)" for rf, sar in bottom3.items()]
                     insight = "Rules catching the fewest SARs (potential high false negative rate): " + ", ".join(parts) + "."
+            elif _sar_question:
+                sar_by_rule = (
+                    DF_RULE_SWEEP[DF_RULE_SWEEP["is_sar"] == 1]
+                    .groupby("risk_factor")
+                    .size()
+                    .sort_values(ascending=False)
+                )
+                top3 = sar_by_rule.head(3)
+                if len(top3):
+                    parts = [f"{rf} ({sar:,} SAR caught)" for rf, sar in top3.items()]
+                    insight = "Rules with the highest SAR catch count: " + ", ".join(parts) + "."
             else:
                 fp_by_rule = (
                     DF_RULE_SWEEP[DF_RULE_SWEEP["is_sar"] == 0]
@@ -1744,26 +1789,65 @@ def handle_chat(new_message, pending_prompt, messages):
             "Rule performance summary — detailed table shown below."
         )
 
-    # If model returned empty/whitespace after a tool call, substitute a neutral fallback.
+    # If model returned empty/whitespace after a tool call, generate a
+    # data-driven insight server-side rather than a generic fallback.
     if chart_results and not (agent_text or "").strip():
-        first_tool = chart_results[0][0]
-        _FALLBACKS = {
-            "rule_sar_backtest":  "SAR backtest results shown below.",
-            "rule_2d_sweep":      "2D sweep results shown below.",
-            "threshold_tuning":   "Threshold sweep results shown below.",
-            "sar_backtest":       "SAR backtest results shown below.",
-            "ds_cluster_analysis":"Cluster analysis results shown below.",
-            "cluster_analysis":   "Cluster analysis results shown below.",
-            "ofac_screening":     "OFAC screening results shown below.",
-            "cluster_rule_summary": "Cluster rule summary shown below.",
-        }
-        agent_text = _FALLBACKS.get(first_tool, "Results shown below.")
+        first_tool, first_input, _ = chart_results[0]
+
+        if first_tool == "rule_sar_backtest" and DF_RULE_SWEEP is not None:
+            rf      = first_input.get("risk_factor", first_input.get("rule_code", ""))
+            sp      = first_input.get("sweep_param", None)
+            cluster = first_input.get("cluster", None)
+            df_rb   = _filter_by_cluster(DF_RULE_SWEEP, cluster)
+            df_rule = df_rb[df_rb["risk_factor"].str.lower() == rf.lower()] if rf else df_rb
+            if sp and sp in df_rule.columns and len(df_rule):
+                total_sar  = int(df_rule["is_sar"].sum())
+                thresholds = sorted(df_rule[sp].dropna().unique())
+                rows = []
+                for t in thresholds[:6]:
+                    caught = int(df_rule[(df_rule[sp] <= t) & (df_rule["is_sar"] == 1)].shape[0])
+                    catch_pct = round(100 * caught / total_sar, 1) if total_sar else 0
+                    rows.append(f"  {sp}={t}: **{caught}** SARs caught ({catch_pct}%)")
+                cluster_tag = f" — Cluster {cluster}" if cluster else ""
+                agent_text = (
+                    f"**{rf} / {sp}{cluster_tag}** — {total_sar} total SARs in scope.\n\n"
+                    + "\n".join(rows)
+                )
+            else:
+                agent_text = f"SAR backtest complete — see chart below for **{rf}**."
+
+        elif first_tool == "threshold_tuning" and DF is not None:
+            seg = first_input.get("segment", "")
+            col = first_input.get("threshold_column", "")
+            agent_text = f"Threshold sweep for **{seg}** customers by **{col}** — chart below."
+
+        elif first_tool in ("sar_backtest",):
+            seg = first_input.get("segment", "")
+            col = first_input.get("threshold_column", "")
+            agent_text = f"SAR backtest for **{seg}** / **{col}** — chart below."
+
+        elif first_tool == "rule_2d_sweep":
+            rf = first_input.get("risk_factor", "")
+            agent_text = f"2D sweep for **{rf}** — use the **Drill-down** button in the sidebar for interactive exploration."
+
+        elif first_tool in ("ds_cluster_analysis", "cluster_analysis"):
+            ct = first_input.get("customer_type", "All")
+            agent_text = (
+                f"Clustering complete for **{ct}** customers. "
+                "Use **Segment Customer Drilldown** and **Cluster Scatter Plot** in the left sidebar to explore."
+            )
+
+        else:
+            agent_text = "Results shown below."
 
     prefix = (ingest_confirmation + "\n\n") if ingest_confirmation else ""
+    all_chart_dicts = []
     if chart_results:
         content = [{"type": "text", "text": prefix + agent_text}] if (prefix + agent_text) else []
         for tool_name, tool_input, fig in chart_results:
-            content.extend(_chart_content(tool_name, tool_input, fig))
+            text_blocks, new_charts = _chart_content(tool_name, tool_input, fig)
+            content.extend(text_blocks)
+            all_chart_dicts.extend(new_charts)
         bot_response = {"role": "assistant", "content": content}
     else:
         bot_response = {"role": "assistant", "content": prefix + (agent_text or "(No response)")}
@@ -1788,23 +1872,51 @@ def handle_chat(new_message, pending_prompt, messages):
                 scatter_store = scatter_fig.to_dict()
             break
 
-    final_messages = _compact_chart_figures(updated + [bot_response])
-    return final_messages[-_MAX_CHAT_MESSAGES:], sweep_store, treemap_store, scatter_store
+    final_messages = (updated + [bot_response])[-_MAX_CHAT_MESSAGES:]
+    charts_out = all_chart_dicts if all_chart_dicts else no_update
+    return final_messages, sweep_store, treemap_store, scatter_store, charts_out
+
+
+@callback(
+    Output("charts-panel", "children"),
+    Input("charts-panel-store", "data"),
+)
+def render_charts_panel(charts):
+    if not charts:
+        return []
+    children = [html.Hr(className="my-3")]
+    for c in charts:
+        h = c.get("height", 460)
+        children.append(
+            html.H6(
+                c["title"],
+                className="fw-semibold text-muted mt-3 mb-1",
+                style={"fontSize": "0.85rem"},
+            )
+        )
+        children.append(
+            dcc.Graph(
+                figure=c["figure"],
+                config={"responsive": True},
+                style={"height": f"{h}px"},
+            )
+        )
+    return children
 
 
 # ── Drill-down callbacks ──────────────────────────────────────────────────────
 
 @callback(
-    Output("drilldown-heatmap", "figure"),
+    Output("drilldown-heatmap", "children"),
     Output("drilldown-btn", "disabled"),
     Input("last-2d-sweep-store", "data"),
 )
 def refresh_drilldown_heatmap(store_data):
-    """Re-render the interactive heatmap in the offcanvas whenever a new 2D sweep fires."""
+    """Render CSS-based heatmap — browser-agnostic, no canvas/WebGL."""
     if not store_data or not _last_2d_state.get("grid"):
-        return {}, True
-    fig = make_figures.rule_2d_heatmap(_last_2d_state["grid"])
-    return fig, False
+        return "", True
+    html_table = make_figures.rule_2d_heatmap_html(_last_2d_state["grid"])
+    return html_table, False
 
 
 @callback(
@@ -1818,20 +1930,34 @@ def toggle_drilldown(n, is_open):
 
 
 @callback(
+    Output("drilldown-heatmap-click-store", "data"),
+    Input({"type": "heatmap-cell", "p1": ALL, "p2": ALL}, "n_clicks"),
+    prevent_initial_call=True,
+)
+def heatmap_cell_clicked(n_clicks_list):
+    """Convert pattern-matched cell click into a (p1_idx, p2_idx) store entry."""
+    ctx = callback_context
+    if not ctx.triggered or not any(n_clicks_list):
+        return no_update
+    triggered_id = ctx.triggered[0]["prop_id"].split(".")[0]
+    import json
+    cell_id = json.loads(triggered_id)
+    return {"p1_idx": cell_id["p1"], "p2_idx": cell_id["p2"]}
+
+
+@callback(
     Output("drilldown-table-container", "children"),
-    Input("drilldown-heatmap", "clickData"),
+    Input("drilldown-heatmap-click-store", "data"),
     prevent_initial_call=True,
 )
 def drilldown_on_click(click_data):
-    """Filter customers at the clicked (p1, p2) cell and render a breakdown table."""
+    """Filter customers at the clicked (p1_idx, p2_idx) cell."""
     if not click_data or not _last_2d_state.get("grid"):
         return "Click a cell in the heatmap to see customer breakdown."
 
-    pt    = click_data["points"][0]
-    # x/y in click_data are axis indices — look up actual parameter values from grid
     grid   = _last_2d_state["grid"]
-    p2_val = grid["p2_vals"][int(pt["x"])]
-    p1_val = grid["p1_vals"][int(pt["y"])]
+    p2_val = grid["p2_vals"][int(click_data["p2_idx"])]
+    p1_val = grid["p1_vals"][int(click_data["p1_idx"])]
 
     rf      = _last_2d_state["risk_factor"]
     param1  = _last_2d_state["param1"]

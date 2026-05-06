@@ -7,7 +7,7 @@ import chromadb
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 from openai import OpenAI
 
-from .base_agent import OLLAMA_BASE_URL, OLLAMA_MODEL, stop_event
+from .base_agent import OLLAMA_BASE_URL, OLLAMA_MODEL, stop_event, _strip_thinking
 from config import MAX_TOKENS_POLICY
 
 _AGENTS_DIR   = os.path.dirname(os.path.abspath(__file__))
@@ -21,6 +21,19 @@ import upload_kb as _upload_kb
 COLLECTION_NAME = "framl_kb"
 TOP_K = 7
 _MAX_PER_SOURCE = 3  # diversity cap: no single document crowds out others
+
+# Jurisdiction ordering: US (0) → UK (1) → International/UN/FATF (2) → EU (3)
+def _source_priority(source: str) -> int:
+    s = source.lower()
+    if any(k in s for k in ["ffiec", "fin-", "bsa", "fincen", "occ", "exam", "wolfsberg_msap", "wolfsberg_rba", "wolfsberg_risk"]):
+        return 0  # US / US-led guidance
+    if any(k in s for k in ["uk", "fca", "hmrc"]):
+        return 1  # UK
+    if any(k in s for k in ["fatf", "unodc", "un_sc", "resolution_1373", "wolfsberg"]):
+        return 2  # International / UN / FATF
+    if any(k in s for k in ["amld", "amlr", "eu_aml", "celex", "eba", "2015_849", "2018l", "2018r", "2024_1624"]):
+        return 3  # EU
+    return 2  # default: international
 
 # Map query keywords → (source file, retrieval_query_override).
 # When the user explicitly names a specific document/resolution, semantic search
@@ -78,11 +91,18 @@ _SYSTEM_PROMPT_TEMPLATE = (
     "(e.g. do NOT write 'UNSC Resolution 1267' unless it appears in the retrieved text)\n"
     "- If the retrieved documents address the question, summarise the concepts they discuss and "
     "reference the document by name from the list above only.\n"
+    "RELEVANCE FILTER: EU legislation documents (AMLD, AMLR, EU AML Regulation, AMLA) are relevant "
+    "ONLY when the question specifically asks about EU regulatory requirements. "
+    "If the question is about a US concept (OFAC, FinCEN, BSA, SDN, CTR, SAR) or a non-EU jurisdiction, "
+    "treat EU legislation chunks as off-topic and rely on your pretrained knowledge instead.\n"
     "IMPORTANT: Only trigger the disclaimer below if ALL retrieved documents are clearly off-topic. "
     "Disclaimer (use ONLY when every retrieved chunk is irrelevant): "
     "Begin with exactly: 'Note: The knowledge base does not contain specific guidance on this topic. "
     "The following is general AML knowledge only.' "
-    "Then provide only general conceptual guidance — 3 to 5 sentences maximum. No numbers, no citations, no named sources. "
+    "Then answer the question fully using your pretrained AML and regulatory knowledge — "
+    "there is no length restriction. For well-known concepts (e.g. OFAC, BSA, CTR, SAR, sanctions screening, "
+    "FinCEN, Wolfsberg Principles), provide a complete and accurate explanation as you would from memory. "
+    "Do not fabricate citations, document names, CFR numbers, or specific thresholds not in the retrieved documents. "
     "Be precise and compliance-focused. "
     "IMPORTANT: You MUST respond entirely in English. Do NOT use any Chinese, Japanese, or other non-English characters. "
 )
@@ -176,6 +196,15 @@ class PolicyAgent:
                         chosen_metas.append(m)
                         seen_per_src[src] = seen_per_src.get(src, 0) + 1
 
+                # Re-order by jurisdiction priority (US → UK → International → EU),
+                # preserving semantic rank within each jurisdiction tier
+                paired = sorted(
+                    enumerate(zip(chosen_docs, chosen_metas)),
+                    key=lambda x: (_source_priority(x[1][1]["source"]), x[0])
+                )
+                chosen_docs  = [d for _, (d, _) in paired]
+                chosen_metas = [m for _, (_, m) in paired]
+
                 for src in dict.fromkeys(m["source"] for m in chosen_metas):
                     sources.append(src)
                 sections += [f"[Policy: {m['source']}]\n{d}"
@@ -259,7 +288,7 @@ class PolicyAgent:
                 filtered.append(cleaned)
         return "\n".join(filtered)
 
-    def run(self, query: str, tool_executor=None, policy_context: str = "", upload_only: bool = False) -> tuple:
+    def run(self, query: str, tool_executor=None, policy_context: str = "", upload_only: bool = False, history: list = None) -> tuple:
         """Returns (response_text, []) — policy agent produces no charts."""
         context, sources = self.retrieve(query, upload_only=upload_only)
         source_list = ", ".join(sources) if sources else "none"
@@ -270,14 +299,16 @@ class PolicyAgent:
         else:
             user_content = f"## Retrieved Policy Documents\n(No relevant documents found in the knowledge base.)\n\n## Question\n{query}"
 
+        conv_messages = [{"role": "system", "content": system_prompt}]
+        if history:
+            conv_messages.extend(history)
+        conv_messages.append({"role": "user", "content": user_content})
+
         stream = self.client.chat.completions.create(
             model=self.model,
             max_tokens=MAX_TOKENS_POLICY,
             stream=True,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_content},
-            ],
+            messages=conv_messages,
         )
         parts = []
         try:
@@ -292,5 +323,6 @@ class PolicyAgent:
         except Exception:
             pass
         text = "".join(parts)
+        text = _strip_thinking(text)
         text = self._strip_fabricated_citations(text, sources)
         return text, []

@@ -133,6 +133,23 @@ Key distinction:
 - "What is a 2D grid?" → threshold  (2D grid = rule_2d_sweep — a threshold tool concept)
 - "What is a 2D sweep?" → threshold
 - "How does a 2D grid work?" → threshold
+- "Are you ARIA?" → greeting  (identity question — not an AML topic)
+- "What is your name?" → greeting
+- "Who are you?" → greeting
+- "Ahoy!" → greeting
+- "Ahoy matey!" → greeting
+- "What are true positives in AML monitoring?" → threshold  (TP/TN definitions are threshold/confusion-matrix concepts)
+- "What are true negatives?" → threshold
+- "What is the difference between TP and TN?" → threshold
+- "What is OFAC?" → policy  (definition question — NOT a screening request)
+- "What does OFAC stand for?" → policy
+- "My dog OFAC met a cat the other day" → out_of_scope  (OFAC here is a name, not AML topic)
+- "OFAC said hello" → out_of_scope  (not an AML query)
+- "Is OFAC the same as sanctions screening?" → policy  (terminology question — NOT a screening request)
+- "What does OFAC stand for?" → policy  (terminology question)
+- "What is OFAC?" → policy
+- "What are the rules that have z_threshold as a parameter?" → threshold  (list_rules — filter by parameter)
+- "Which rule shows the highest SAR count?" → threshold  (list_rules tool)
 
 Rules:
 - Output ONLY the label(s), comma-separated. No explanation, no punctuation other than commas.
@@ -204,12 +221,25 @@ class OrchestratorAgent:
                     return True
             return False
 
+        # Dataset summary / count queries → always threshold (segment_stats tool)
+        _is_dataset_summary = any(p in q_lower for p in [
+            "how many customers", "how many alerts", "how many accounts",
+            "total customers", "total alerts", "total accounts",
+            "customers and alerts", "alerts and customers",
+            "in the dataset", "summary of the data", "data summary",
+            "give me a summary", "overview of the data", "dataset overview",
+            "how much data", "size of the dataset",
+        ])
+        if _is_dataset_summary:
+            labels = ["threshold"]
+            print("[orchestrator] keyword override → threshold (dataset summary / count query)")
+
         is_segmentation = (
             any(w in q_lower for w in ["cluster", "segment", "k-means", "kmeans", "treemap"])
             or _fuzzy(_words, ["cluster", "clustering", "segment", "segmentation", "kmeans"])
         )
         is_threshold = (
-            any(w in q_lower for w in ["sweep", "fp", "fn", "sar", "heatmap", "backtest", "tuning", "threshold", "2d grid", "2d analysis", "grid analysis"])
+            any(w in q_lower for w in ["sweep", "fp", "fn", "sar", "heatmap", "backtest", "tuning", "threshold", "2d grid", "2d analysis", "grid analysis", "true positive", "true negative"])
             or _fuzzy(_words, ["threshold", "tuning", "backtest", "heatmap", "sweep"])
         )
         is_rule_query = (
@@ -236,8 +266,8 @@ class OrchestratorAgent:
             labels = ["threshold"]
             print("[orchestrator] keyword override → threshold (rescued from out_of_scope)")
 
-        # Rescue FP/FN/2D definitional questions classified as "policy" → threshold
-        _fn_fp_kw = ["false positive", "false negative", "2d grid", "2d sweep"]
+        # Rescue FP/FN/TP/TN/2D definitional questions classified as "policy" → threshold
+        _fn_fp_kw = ["false positive", "false negative", "true positive", "true negative", "2d grid", "2d sweep"]
         if labels == ["policy"] and not is_segmentation and not is_threshold and any(kw in q_lower for kw in _fn_fp_kw):
             labels = ["threshold"]
             print("[orchestrator] keyword override → threshold (FP/FN/2D definition rescued from policy)")
@@ -256,14 +286,20 @@ class OrchestratorAgent:
             print("[orchestrator] keyword override → policy (EU/UN/FATF/beneficial-ownership)")
 
         # Rescue greetings and social acknowledgments misclassified as out_of_scope
-        _greeting_tokens = {"hello", "hi", "hey", "howdy", "greetings"}
+        _greeting_tokens = {"hello", "hi", "hey", "howdy", "greetings", "ahoy"}
         _social_phrases  = ["thanks", "thank you", "that was helpful", "that's helpful",
                             "got it", "great, thanks", "sounds good", "perfect, thanks",
-                            "appreciate it", "cheers"]
+                            "appreciate it", "cheers", "ahoy matey"]
+        _identity_phrases = ["what is your name", "what's your name", "who are you",
+                             "are you aria", "your name is", "tell me your name"]
         _is_social = (q_lower.strip() in _greeting_tokens
                       or any(q_lower.strip().startswith(p) or q_lower.strip() == p
                              for p in _social_phrases))
-        if labels == ["out_of_scope"] and _is_social:
+        _is_identity = any(p in q_lower for p in _identity_phrases)
+        if _is_identity:
+            labels = ["greeting"]
+            print("[orchestrator] keyword override → greeting (identity question)")
+        elif labels == ["out_of_scope"] and _is_social:
             labels = ["greeting"]
             print("[orchestrator] keyword override → greeting (rescued social acknowledgment from out_of_scope)")
 
@@ -276,25 +312,16 @@ class OrchestratorAgent:
             labels = ["out_of_scope"]
             print("[orchestrator] keyword override → out_of_scope (data question misclassified as greeting)")
 
-        # OFAC keyword override — always catch sanctions/OFAC queries
-        # Exception: "which/how many customers have OFAC hits" = data query → policy decline
-        _ofac_data_query = any(p in q_lower for p in [
-            "which customers", "how many customers", "list customers",
-            "customers have ofac", "customers with ofac", "customers on the",
-            "portfolio have", "how many have",
-            "are there any customers", "customers flagged", "flagged for sanctions",
-            "any customers", "show me customers",
-        ])
-        is_ofac = any(w in q_lower for w in [
-            "ofac", "sdn", "sanctions", "sanctioned", "sanction list",
-            "iran exposure", "north korea exposure", "dprk", "SDN list",
-        ])
-        if is_ofac and not _ofac_data_query:
-            labels = ["ofac"]
-            print("[orchestrator] keyword override → ofac")
-        elif is_ofac and _ofac_data_query:
-            labels = ["policy"]
-            print("[orchestrator] keyword override → policy (OFAC data query)")
+        # OFAC guard: only route to ofac agent when there is explicit screening-action context
+        if "ofac" in labels:
+            _ofac_action = any(p in q_lower for p in [
+                "screen", "sdn", "scan", "ofac hit", "ofac exposure", "check ofac",
+                "run ofac", "ofac check", "ofac list", "sanctions", "sanctioned",
+                "sanction list", "iran", "north korea", "dprk",
+            ])
+            if not _ofac_action:
+                labels = ["policy"]
+                print("[orchestrator] OFAC reclassified → policy (no screening action context)")
 
         # Threshold column names as bare replies (clarification follow-ups)
         _THRESHOLD_COLS = {"avg_trxns_week", "avg_trxn_amt", "trxn_amt_monthly"}
@@ -305,35 +332,16 @@ class OrchestratorAgent:
         # Keyword fallback when fine-tuned model ignores classification prompt
         if not labels:
             q = query.lower()
-            if any(w in q for w in ["ofac", "sdn", "sanction"]):
-                labels = ["ofac"]
-            elif any(w in q for w in ["threshold", "sweep", "fp", "fn", "sar", "heatmap", "rule", "alert", "tuning", "backtest",
+            if any(w in q for w in ["threshold", "sweep", "fp", "fn", "sar", "heatmap", "rule", "alert", "tuning", "backtest",
                                       "avg_trxns_week", "avg_trxn_amt", "trxn_amt_monthly",
-                                      "false positive", "false negative", "2d grid", "2d sweep"]):
+                                      "false positive", "false negative", "true positive", "true negative", "2d grid", "2d sweep"]):
                 labels = ["threshold"]
             elif any(w in q for w in ["cluster", "segment", "k-means", "kmeans", "treemap"]):
                 labels = ["segmentation"]
-            elif any(w in q for w in [
-                "policy", "compliance", "regulation", "bsa", "aml", "wolfsberg", "fincen",
-                "structuring", "tructur", "smurfing", "bank secrecy", "anti-money", "anti money",
-                "know your customer", "kyc", "cdd", "due diligence",
-                "suspicious activity", "currency transaction",
-                "uploaded", "document", "this document", "the file", "according to",
-                "canada", "fintrac", "pcmltfa", "reporting requirement", "filing requirement",
-                "typology", "layering", "placement",
-                # EU / international regulatory keywords
-                "beneficial ownership", "beneficial owner", "amld", "amla",
-                "directive", "eu aml", "eu regulation", "unodc", "fatf",
-                "financial action task force", "eba guideline", "eba gl",
-                "un security council", "resolution 1373", "wolfsberg",
-                "politically exposed", "pep ", "enhanced due diligence",
-                "4th amld", "5th amld", "6th amld", "sixth amld",
-            ]):
-                labels = ["policy"]
             elif any(re.fullmatch(w, tok) for w in ["hello", "hi", "hey", "howdy", "greetings"] for tok in q.split()):
                 labels = ["greeting"]
             else:
-                labels = ["out_of_scope"]
+                labels = ["policy"]
             print(f"[orchestrator] keyword fallback labels: {labels}")
 
         # Final guard: data questions must never route to greeting
@@ -344,7 +352,7 @@ class OrchestratorAgent:
         print(f"[orchestrator] routing to: {labels}")
         return labels
 
-    def run(self, query: str, tool_executor, last_assistant: str = "") -> tuple:
+    def run(self, query: str, tool_executor, last_assistant: str = "", history: list = None) -> tuple:
         """
         Route query via LLM, run required agents (in parallel if >1), merge results.
         Returns: (combined_text, all_chart_results)
@@ -396,22 +404,26 @@ class OrchestratorAgent:
             if name == "segmentation" and last_assistant:
                 q_lower = query.lower()
                 _followup_words = [
-                    "characterize", "describe", "explain", "tell me about",
+                    "characterize", "characteristic", "describe", "explain", "tell me about",
                     "what is cluster", "what makes cluster", "how would you describe",
+                    "how about", "what about", "and cluster", "about cluster",
                     "compare cluster", "differ", "different about", "distinguish",
                     "high risk", "low risk", "risky", "profile",
+                    "analyze", "analysis", "drill", "look at", "above", "above result",
+                    "more detail", "more info", "expand on", "elaborate",
                 ]
                 _has_cluster_ref = re.search(r'\bcluster\s*\d+\b', q_lower)
+                # Also catch bare "how about cluster 4" where the number appears without "cluster N" prefix
                 _is_followup = _has_cluster_ref and any(w in q_lower for w in _followup_words)
                 if _is_followup and "Cluster" in last_assistant:
                     context = f"[PREVIOUS CLUSTERING RESULT]\n{last_assistant}\n[END PREVIOUS RESULT]"
                     print("[orchestrator] injecting previous cluster context for follow-up")
-            return agent.run(query, tool_executor, context)
+            return agent.run(query, tool_executor, context, history)
 
         results = {}
         with ThreadPoolExecutor(max_workers=len(to_run)) as executor:
             futures = {
-                executor.submit(agent.run, query, tool_executor): name
+                executor.submit(agent.run, query, tool_executor, "", history): name
                 for name, agent in to_run
             }
             for future in as_completed(futures):
