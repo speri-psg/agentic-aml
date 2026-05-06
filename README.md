@@ -96,7 +96,7 @@ No real customer data. All IDs are UUIDs generated at build time.
 - **Analytics**: pandas, scikit-learn, Plotly
 - **Knowledge base**: ChromaDB + sentence-transformers (`all-MiniLM-L6-v2`)
 - **Regulatory docs**: FFIEC, Wolfsberg, FinCEN, FATF, EU 4th/5th/6th AMLD, AMLR 2024, UNODC
-- **Training**: Unsloth SFT on vast.ai (RTX 3090 / RTX 4090)
+- **Training**: Unsloth SFT on Nvidia GPUs
 
 ## Running locally
 
