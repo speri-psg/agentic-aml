@@ -14,7 +14,8 @@ short_description: "ARIA-v1: agentic AML analytics — threshold tuning, segment
 An AI-powered Anti-Money Laundering (AML) analytics assistant. ARIA uses a fine-tuned
 **Gemma 4 4B** model and an agentic tool-calling architecture to help compliance teams
 analyze alert thresholds, segment customers, query regulatory policy, and screen against
-sanctions lists — all through a natural language chat interface.
+sanctions lists — all through a natural language chat interface with the model running locally 
+to ensure customer data remians local and secure without leaking into any outside LLMs.
 
 ## What it does
 
