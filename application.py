@@ -708,9 +708,10 @@ def _filter_by_cluster(df_rule_sweep, cluster):
 
 
 # ── Tool executor ─────────────────────────────────────────────────────────────
-_cluster_cache  = _startup_cluster_cache  # pre-populated at startup; updated on each cluster run
-_current_query  = ""  # set before each orchestrator.run() so tool_executor can read it
-_last_2d_state  = {}  # caches last 2D sweep for drill-down (single-user demo)
+_cluster_cache        = _startup_cluster_cache  # pre-populated at startup; updated on each cluster run
+_current_query        = ""  # set before each orchestrator.run() so tool_executor can read it
+_last_2d_state        = {}  # caches last 2D sweep for drill-down (single-user demo)
+_last_cluster_result  = ""  # full multi-cluster response; injected as [PREVIOUS CLUSTERING RESULT] for follow-ups
 
 def tool_executor(tool_name, tool_input):
     """Execute a tool called by an agent. Returns (result_text, fig_or_None)."""
@@ -1600,7 +1601,7 @@ def handle_chat(new_message, pending_prompt, messages):
     _agent_stop_event.clear()
 
     try:
-        global _current_query
+        global _current_query, _last_cluster_result
         _current_query = query
         def _msg_text(m):
             c = m.get("content", "")
@@ -1636,7 +1637,12 @@ def handle_chat(new_message, pending_prompt, messages):
         if ingest_confirmation:
             agent_text, chart_results = orchestrator.policy_agent.run(query, tool_executor, upload_only=True)
         else:
-            agent_text, chart_results = orchestrator.run(query, tool_executor, last_assistant, history)
+            agent_text, chart_results = orchestrator.run(query, tool_executor, last_assistant, history, _last_cluster_result)
+        # Persist full clustering result for multi-turn cluster follow-ups.
+        # Only update when a new clustering tool was actually called (chart present = tool ran).
+        _seg_cluster_tools = {"ds_cluster_analysis", "cluster_analysis"}
+        if any(r[0] in _seg_cluster_tools for r in chart_results):
+            _last_cluster_result = agent_text or ""
         print(f"[app] raw agent_text ({len(agent_text or '')} chars): {repr((agent_text or '')[:300])}")
     except Exception as e:
         import traceback
@@ -1683,6 +1689,7 @@ def handle_chat(new_message, pending_prompt, messages):
     # Strip DISPLAY_CLUSTERS line and PRE-COMPUTED ANALYSIS markers from displayed text
     agent_text = re.sub(r'<eos>', '', agent_text or "").strip()               # Gemma 4 leaks <eos> tokens (strip all)
     agent_text = re.sub(r'\bEnd chunk\b\s*', '', agent_text).strip()          # leaked training artifact
+    agent_text = re.sub(r'^Tool result for [^:\n]+:\n?', '', agent_text, flags=re.MULTILINE).strip()  # model copies tool-msg prefix
     agent_text = re.sub(r'^The PRE-COMPUTED[^\n]*\n?', '', agent_text).strip()  # leaked instruction header
     agent_text = re.sub(r'\s*DISPLAY_CLUSTERS:[\d,\s]*', '', agent_text).strip()
     agent_text = re.sub(r'===.*?PRE-COMPUTED ANALYSIS.*?===\n?', '', agent_text).strip()
@@ -1692,6 +1699,13 @@ def handle_chat(new_message, pending_prompt, messages):
     agent_text = re.sub(r'===\s*END PRE-COMPUTED SEGMENT STATS\s*===\n?', '', agent_text).strip()
     agent_text = re.sub(r'===.*?PRE-COMPUTED CLUSTER STATS.*?===\n?', '', agent_text).strip()
     agent_text = re.sub(r'===\s*END PRE-COMPUTED CLUSTER STATS\s*===\n?', '', agent_text).strip()
+    # Replace LaTeX math operators — model occasionally emits $\ge$/$\le$ instead of >= / <=
+    agent_text = re.sub(r'\$\\geq\$', '≥', agent_text)
+    agent_text = re.sub(r'\$\\leq\$', '≤', agent_text)
+    agent_text = re.sub(r'\$\\ge\$',  '≥', agent_text)
+    agent_text = re.sub(r'\$\\le\$',  '≤', agent_text)
+    agent_text = re.sub(r'\$\\gt\$',  '>',  agent_text)
+    agent_text = re.sub(r'\$\\lt\$',  '<',  agent_text)
     agent_text = re.sub(r'===.*?PRE-COMPUTED SAR BACKTEST.*?===\n?', '', agent_text).strip()
     agent_text = re.sub(r'===\s*END PRE-COMPUTED SAR BACKTEST\s*===\n?', '', agent_text).strip()
     agent_text = re.sub(r'===.*?PRE-COMPUTED RULE SWEEP.*?===\n?', '', agent_text).strip()
@@ -1869,6 +1883,9 @@ def handle_chat(new_message, pending_prompt, messages):
             # scatter is always second-to-last in the tuple: (stats?, scatter, treemap)
             scatter_fig = f[-2]
             if scatter_fig is not None:
+                # Explicit height required — offcanvas is display:none when store updates,
+                # so responsive mode can't infer container size and renders blank without it.
+                scatter_fig.update_layout(height=480)
                 scatter_store = scatter_fig.to_dict()
             break
 

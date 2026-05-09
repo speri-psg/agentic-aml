@@ -50,6 +50,15 @@ Key distinction:
 - "What happens to FP if I raise the age threshold for Elder Abuse?" → threshold
 - "How do banks manage alert volumes?" → policy  (general knowledge question)
 - "What is AML?" → policy  (general knowledge question)
+- "What is threshold tuning?" → policy  (conceptual overview of the practice — NOT a request to run analysis on local data)
+- "Explain threshold tuning" → policy  (explanation request — NOT running local data)
+- "How does threshold tuning work?" → policy
+- "Can you explain what threshold tuning means?" → policy
+- "What is dynamic segmentation?" → policy  (conceptual question — NOT a request to run clustering)
+- "Explain dynamic segmentation" → policy
+- "How does behavioral segmentation work?" → policy
+- "What is K-Means clustering?" → policy
+- "What is customer segmentation?" → policy
 - "Cluster all customers" → segmentation  (run local analysis)
 - "What does AML policy say about structuring?" → policy  (general knowledge + knowledge base)
 - "Show alerts and false positive distribution across segments" → segmentation  (distribution chart, NOT threshold tuning)
@@ -352,7 +361,7 @@ class OrchestratorAgent:
         print(f"[orchestrator] routing to: {labels}")
         return labels
 
-    def run(self, query: str, tool_executor, last_assistant: str = "", history: list = None) -> tuple:
+    def run(self, query: str, tool_executor, last_assistant: str = "", history: list = None, last_cluster_result: str = "") -> tuple:
         """
         Route query via LLM, run required agents (in parallel if >1), merge results.
         Returns: (combined_text, all_chart_results)
@@ -408,15 +417,16 @@ class OrchestratorAgent:
                     "what is cluster", "what makes cluster", "how would you describe",
                     "how about", "what about", "and cluster", "about cluster",
                     "compare cluster", "differ", "different about", "distinguish",
-                    "high risk", "low risk", "risky", "profile",
+                    "similar", "same", "high risk", "low risk", "risky", "profile",
                     "analyze", "analysis", "drill", "look at", "above", "above result",
                     "more detail", "more info", "expand on", "elaborate",
                 ]
                 _has_cluster_ref = re.search(r'\bcluster\s*\d+\b', q_lower)
                 # Also catch bare "how about cluster 4" where the number appears without "cluster N" prefix
                 _is_followup = _has_cluster_ref and any(w in q_lower for w in _followup_words)
-                if _is_followup and "Cluster" in last_assistant:
-                    context = f"[PREVIOUS CLUSTERING RESULT]\n{last_assistant}\n[END PREVIOUS RESULT]"
+                _cluster_ctx = last_cluster_result or last_assistant
+                if _is_followup and "Cluster" in _cluster_ctx:
+                    context = f"[PREVIOUS CLUSTERING RESULT]\n{_cluster_ctx}\n[END PREVIOUS RESULT]"
                     print("[orchestrator] injecting previous cluster context for follow-up")
             return agent.run(query, tool_executor, context, history)
 
