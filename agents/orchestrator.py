@@ -19,6 +19,20 @@ from .threshold_agent import ThresholdAgent
 from .segmentation_agent import SegmentationAgent
 from .policy_agent import PolicyAgent
 
+def _is_elliptical(query: str) -> bool:
+    """True if query is a short/elliptical continuation that lacks standalone routing signal."""
+    q = query.lower().strip()
+    words = q.split()
+    if q.startswith(("and ", "what about ", "how about ", "which ", "top ", "bottom ")):
+        return True
+    if len(words) <= 7 and any(kw in q for kw in [
+        "highest", "lowest", "most", "least", "best", "worst",
+        "youngest", "oldest", "largest", "smallest", "fewest",
+    ]):
+        return True
+    return False
+
+
 _CLASSIFY_SYSTEM = """\
 You are a routing classifier for ARIA. Given a user query, respond with \
 one or more of these labels (comma-separated, no other text):
@@ -221,6 +235,7 @@ class OrchestratorAgent:
             "policy":       self.policy_agent,
         }
         self._client = OpenAI(base_url=OLLAMA_BASE_URL, api_key="ollama")
+        self._last_agent: str = ""  # tracks last threshold/segmentation turn for sticky routing
 
     def _route(self, query: str, last_assistant: str = "") -> list:
         """LLM-based routing — classify query into agent labels."""
@@ -418,6 +433,16 @@ class OrchestratorAgent:
         """
         labels = self._route(query, last_assistant)
 
+        # Sticky routing: elliptical follow-ups routed to policy/weak labels → re-use prior agent.
+        # Covers "and the youngest", "which one has lowest", "top 3 by precision", "what about days_required?"
+        _STICKY_SOURCES = {"threshold", "segmentation"}
+        _WEAK_LABELS = {"policy", "out_of_scope", "greeting", "capability"}
+        if (self._last_agent in _STICKY_SOURCES
+                and set(labels) <= _WEAK_LABELS
+                and _is_elliptical(query)):
+            print(f"[orchestrator] sticky routing -> {self._last_agent} (elliptical follow-up)", flush=True)
+            labels = [self._last_agent]
+
         # Build prior session context once — passed to every agent (including policy)
         # so elliptical follow-ups ("and the youngest", "what about days_required?")
         # can be answered correctly even when misrouted.
@@ -483,6 +508,8 @@ class OrchestratorAgent:
 
         if len(to_run) == 1:
             name, agent = to_run[0]
+            if name in _STICKY_SOURCES:
+                self._last_agent = name
             context = ""
             if last_rule_list:
                 _rule_ctx = last_rule_list[:4000] if len(last_rule_list) > 4000 else last_rule_list
