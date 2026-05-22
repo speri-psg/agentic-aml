@@ -10,6 +10,7 @@ with patch("openai.OpenAI", return_value=MagicMock()):
         SYSTEM_PROMPT,
         _INVALID_PARAMS,
         _REJECTION_MSG,
+        _N_RULES,
     )
 
 
@@ -81,7 +82,7 @@ class TestToolsDefinition:
     EXPECTED_TOOLS = {
         "threshold_tuning", "segment_stats", "sar_backtest",
         "rule_2d_sweep", "list_rules", "rule_sar_backtest",
-        "cluster_rule_summary",
+        "cluster_rule_summary", "cluster_threshold_analysis",
     }
 
     def _tool_names(self):
@@ -185,7 +186,7 @@ class TestToolsDefinition:
 
 class TestSystemPrompt:
     def test_exactly_16_rules_stated(self):
-        assert "exactly 16 AML rules" in SYSTEM_PROMPT
+        assert f"exactly {_N_RULES} AML detection rules" in SYSTEM_PROMPT
 
     def test_default_segment_is_business(self):
         assert "default to Business" in SYSTEM_PROMPT
