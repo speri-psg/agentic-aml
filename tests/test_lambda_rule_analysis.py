@@ -150,7 +150,7 @@ class TestListRulesText:
     def test_contains_pre_computed_header(self):
         df = _rule_df("Activity Deviation (ACH)")
         result = list_rules_text(df)
-        assert "PRE-COMPUTED RULE LIST" in result
+        assert "RULE LIST" in result
 
     def test_contains_all_rule_names(self):
         df = pd.concat([_rule_df(e["name"]) for e in RULE_CATALOGUE.values()], ignore_index=True)
@@ -204,7 +204,7 @@ class TestClusterRuleSummaryText:
     def test_contains_pre_computed_header(self):
         df = _multi_rule_df()
         result = cluster_rule_summary_text(df, 4)
-        assert "PRE-COMPUTED CLUSTER RULE SUMMARY" in result
+        assert "CLUSTER RULE SUMMARY" in result
 
     def test_contains_end_marker(self):
         df = _multi_rule_df()
@@ -267,11 +267,11 @@ class TestClusterRuleSummaryText:
             assert f"Cluster {cluster_n}" in result
 
     def test_result_is_verbatim_copyable(self):
-        # The block must start and end with the PRE-COMPUTED markers
+        # The block must start and end with the section markers
         df = _multi_rule_df()
         result = cluster_rule_summary_text(df, 4)
         lines = result.strip().splitlines()
-        assert lines[0].startswith("=== PRE-COMPUTED CLUSTER RULE SUMMARY")
+        assert lines[0].startswith("=== CLUSTER RULE SUMMARY")
         assert lines[-1].startswith("=== END CLUSTER RULE SUMMARY")
 
 
@@ -289,7 +289,7 @@ class TestComputeRuleSarSweep:
 
     def test_contains_pre_computed_header(self):
         result = compute_rule_sar_sweep(self._df(), "activity deviation (ach)")
-        assert "PRE-COMPUTED RULE SWEEP" in result
+        assert "RULE SWEEP" in result
 
     def test_contains_end_marker(self):
         result = compute_rule_sar_sweep(self._df(), "activity deviation (ach)")
@@ -327,13 +327,13 @@ class TestComputeRuleSarSweep:
         result_default = compute_rule_sar_sweep(df, "activity deviation (ach)", sweep_param=None)
         result_explicit = compute_rule_sar_sweep(df, "activity deviation (ach)", sweep_param="floor_amount")
         # Both should use floor_amount as the default for ACH
-        assert "PRE-COMPUTED RULE SWEEP" in result_default
+        assert "RULE SWEEP" in result_default
 
     def test_sweep_param_normalization(self):
         df = self._df()
         # Spaces and hyphens in param name should be normalized
         result = compute_rule_sar_sweep(df, "activity deviation (ach)", sweep_param="floor amount")
-        assert "PRE-COMPUTED RULE SWEEP" in result
+        assert "RULE SWEEP" in result
 
     def test_contains_tp_rate_90_line(self):
         df = self._df(n_sar=30)
@@ -370,7 +370,7 @@ class TestComputeRule2dSweep:
 
     def test_text_contains_pre_computed_header(self):
         text, grid = compute_rule_2d_sweep(self._df(), "activity deviation (ach)")
-        assert "PRE-COMPUTED 2D SWEEP" in text
+        assert "2D SWEEP" in text
 
     def test_grid_dict_has_required_keys(self):
         text, grid = compute_rule_2d_sweep(self._df(), "activity deviation (ach)")

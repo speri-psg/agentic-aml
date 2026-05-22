@@ -245,7 +245,7 @@ class TestPerformClustering:
     def test_stats_contains_pre_computed_header(self):
         df = _clustering_df()
         _, stats, _ = perform_clustering(df, n_clusters=3)
-        assert "PRE-COMPUTED CLUSTER STATS" in stats
+        assert "CLUSTER STATS" in stats
 
     def test_stats_contains_cluster_count(self):
         df = _clustering_df()

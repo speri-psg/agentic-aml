@@ -379,7 +379,7 @@ def list_rules_text(df):
     """
     Pre-computed text listing available rules with SAR/FP counts and sweep options.
     """
-    lines = ["=== PRE-COMPUTED RULE LIST (copy this verbatim) ==="]
+    lines = ["=== RULE LIST ==="]
     lines.append("Available AML rules with SAR/FP performance (detailed table shown in chart below):")
     lines.append("NOTE: This is the COMPLETE list of rules in the system. Do NOT add or infer any rules not listed here.")
 
@@ -410,14 +410,14 @@ def cluster_rule_summary_text(df, cluster_n):
     """
     if df is None or len(df) == 0:
         return (
-            f"=== PRE-COMPUTED CLUSTER RULE SUMMARY (copy this verbatim) ===\n"
+            f"=== CLUSTER RULE SUMMARY ===\n"
             f"Cluster {cluster_n} — no alert data found for this cluster.\n"
             f"=== END CLUSTER RULE SUMMARY ==="
         )
 
     n_customers = df["customer_id"].nunique() if "customer_id" in df.columns else len(df)
 
-    lines = ["=== PRE-COMPUTED CLUSTER RULE SUMMARY (copy this verbatim) ==="]
+    lines = ["=== CLUSTER RULE SUMMARY ==="]
     lines.append(f"Cluster {cluster_n} — {n_customers:,} customers in rule alert data")
     lines.append("SAR/FP performance for all rules filtered to this cluster:")
     lines.append("NOTE: alerts=0 means no alerts from this rule for customers in this cluster.")
@@ -484,7 +484,7 @@ def compute_rule_sar_sweep(df, risk_factor_keyword, sweep_param=None, max_rows=M
     precision  = round(100 * total_sars / total, 1) if total > 0 else 0.0
 
     header = [
-        "=== PRE-COMPUTED RULE SWEEP (copy this verbatim, do not alter numbers) ===",
+        "=== RULE SWEEP ===",
         f"Rule: {rf_name}",
         f"Current condition: {entry['current']}",
         f"Sweep parameter: {sweep_param} - {sp['desc']}",
@@ -816,7 +816,7 @@ def compute_rule_2d_sweep(df, risk_factor_keyword, param1=None, param2=None):
     cur_tn  = total_fps  - cur_fp
 
     lines = [
-        "=== PRE-COMPUTED 2D SWEEP (copy this verbatim, do not alter numbers) ===",
+        "=== 2D SWEEP ===",
         f"Rule: {rf_name}",
         f"Axis 1 ({param1}): {sp1['desc']}",
         f"Axis 2 ({param2}): {sp2['desc']}",

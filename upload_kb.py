@@ -1,9 +1,15 @@
 """
-upload_kb.py — Runtime document uploads into a dedicated ChromaDB collection.
+upload_kb.py — Org document store backed by ChromaDB (user_uploads collection).
 
-Uploaded documents are stored in the "user_uploads" collection, separate from
-the regulatory "framl_kb" collection, so the policy KB is never polluted.
-The policy agent merges both collections at retrieval time.
+Documents can be loaded two ways:
+  1. Via the Dash app upload interface (runtime, per-session)
+  2. Via CLI for bulk pre-loading:
+       python upload_kb.py path/to/doc.pdf [path/to/doc2.pdf ...]
+       python upload_kb.py --clear          # remove all uploaded docs
+       python upload_kb.py --list           # show loaded documents
+
+The policy agent queries this collection for context on every question.
+General AML regulatory knowledge comes from the model's training, not this KB.
 """
 
 import base64
@@ -45,12 +51,33 @@ def _get_collection():
     return _collection
 
 
+_INJECTION_PATTERNS = [
+    "ignore previous instructions",
+    "ignore all previous",
+    "disregard previous",
+    "respond with text only",
+    "do not call any tools",
+    "do not use any tools",
+    "respond only in plain text",
+    "new instructions:",
+    "system override",
+    "you are now",
+    "forget everything",
+]
+
+
+def _looks_like_injection(chunk: str) -> bool:
+    """Return True if a chunk appears to contain a prompt-injection payload."""
+    low = chunk.lower()
+    return any(pat in low for pat in _INJECTION_PATTERNS)
+
+
 def _chunk_text(text: str) -> list:
     words = text.split()
     chunks = []
     for i in range(0, len(words), CHUNK_SIZE - CHUNK_OVERLAP):
         chunk = " ".join(words[i : i + CHUNK_SIZE])
-        if chunk.strip():
+        if chunk.strip() and not _looks_like_injection(chunk):
             chunks.append(chunk)
     return chunks
 
@@ -169,3 +196,60 @@ def list_uploads() -> list:
         return names
     except Exception:
         return []
+
+
+def clear_uploads() -> int:
+    """Delete all documents from user_uploads. Returns number of chunks removed."""
+    coll = _get_collection()
+    count = coll.count()
+    if count == 0:
+        return 0
+    all_ids = coll.get()["ids"]
+    BATCH = 100
+    for i in range(0, len(all_ids), BATCH):
+        coll.delete(ids=all_ids[i : i + BATCH])
+    return count
+
+
+if __name__ == "__main__":
+    import sys as _sys
+    import mimetypes
+
+    args = _sys.argv[1:]
+    if not args:
+        print("Usage:")
+        print("  python upload_kb.py <file1> [file2 ...]   — load documents")
+        print("  python upload_kb.py --list                — show loaded documents")
+        print("  python upload_kb.py --clear               — remove all documents")
+        _sys.exit(0)
+
+    if args == ["--list"]:
+        names = list_uploads()
+        if not names:
+            print("No documents loaded.")
+        else:
+            print(f"{len(names)} document(s) in org KB:")
+            for n in names:
+                print(f"  {n}")
+        _sys.exit(0)
+
+    if args == ["--clear"]:
+        removed = clear_uploads()
+        print(f"Cleared {removed} chunks from org KB.")
+        _sys.exit(0)
+
+    import base64 as _b64
+    for path in args:
+        if not os.path.exists(path):
+            print(f"Not found: {path}")
+            continue
+        fname = os.path.basename(path)
+        mime, _ = mimetypes.guess_type(path)
+        with open(path, "rb") as _f:
+            raw = _f.read()
+        data_url = f"data:{mime or 'application/octet-stream'};base64,{_b64.b64encode(raw).decode()}"
+        try:
+            n = ingest_upload(data_url, fname, mime or "")
+            print(f"Loaded '{fname}' → {n} chunks")
+        except Exception as e:
+            print(f"Error loading '{fname}': {e}")
