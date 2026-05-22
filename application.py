@@ -928,6 +928,19 @@ def tool_executor(tool_name, tool_input):
             figs = (stats_table, scatter_fig, treemap_fig) if stats_table is not None else (scatter_fig, treemap_fig)
             return stats, figs
 
+    elif tool_name == "cluster_threshold_analysis":
+        if DF_SS is None or DF_SAR is None:
+            return "Segmentation or SAR data not available.", None
+        import lambda_cluster_threshold
+        segment     = tool_input.get("segment", "Business")
+        raw_col     = tool_input.get("threshold_column", "AVG_TRXNS_WEEK")
+        n_clusters  = int(tool_input.get("n_clusters", 4))
+        target_rate = float(tool_input.get("target_sar_rate", 0.90))
+        text, fig = lambda_cluster_threshold.cluster_threshold_analysis(
+            DF_SS, DF_SAR, segment, raw_col, n_clusters, target_rate
+        )
+        return text, fig
+
     elif tool_name == "ofac_screening":
         filter_type = tool_input.get("filter_type", "all")
         return lambda_ofac.ofac_screening(filter_type=filter_type)

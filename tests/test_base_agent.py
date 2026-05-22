@@ -15,6 +15,7 @@ with patch("openai.OpenAI", return_value=MagicMock()):
         _ARG_ALIASES,
         stop_event,
         BaseAgent,
+        _strip_thinking,
     )
 
 
@@ -313,3 +314,70 @@ class TestPolicyContextMerge:
         query = "Show FP/FN tuning"
         result = f"{context}\n\n{query}".strip() if context else query
         assert result == "Show FP/FN tuning"
+
+
+# ── Format 5 NL fallback guard ─────────────────────────────────────────────────
+
+class TestNLFallbackGuard:
+    """Format 5 must only fire for known tool names, not arbitrary English words."""
+
+    def test_common_word_has_rejected(self):
+        # Real bug: model output "using has 16 rules" → parser extracted "has" as tool
+        result = _parse_tool_call_from_content("The system using has 16 rules available.")
+        assert result is None
+
+    def test_common_word_algorithms_rejected(self):
+        result = _parse_tool_call_from_content("I am using algorithms to compute the answer.")
+        assert result is None
+
+    def test_common_word_call_rejected(self):
+        # "call" itself triggered as a false tool name
+        result = _parse_tool_call_from_content("I will use call-and-response to explain.")
+        assert result is None
+
+    def test_known_tool_list_rules_matched(self):
+        result = _parse_tool_call_from_content("I will call list_rules to retrieve the data.")
+        assert result is not None
+        name, _ = result
+        assert name == "list_rules"
+
+    def test_known_tool_alias_matched_and_resolved(self):
+        # Alias "cluster_analysis" → resolved to "ds_cluster_analysis"
+        result = _parse_tool_call_from_content("using cluster_analysis to segment customers")
+        assert result is not None
+        name, _ = result
+        assert name == "ds_cluster_analysis"
+
+    def test_known_tool_ofac_screening_matched(self):
+        result = _parse_tool_call_from_content("call ofac_screening to check sanctions")
+        assert result is not None
+        name, _ = result
+        assert name == "ofac_screening"
+
+
+# ── _strip_thinking ────────────────────────────────────────────────────────────
+
+class TestStripThinking:
+    def test_plain_text_unchanged(self):
+        assert _strip_thinking("The answer is 42.") == "The answer is 42."
+
+    def test_empty_string_unchanged(self):
+        assert _strip_thinking("") == ""
+
+    def test_none_unchanged(self):
+        assert _strip_thinking(None) is None
+
+    def test_ollama_thinking_block_stripped(self):
+        content = "Thinking...\nI should look at precision values.\n...done thinking.\n\nThe top rule is Round-trip."
+        assert _strip_thinking(content) == "The top rule is Round-trip."
+
+    def test_thinking_without_done_marker_strips_first_line(self):
+        content = "Thinking...\nsome thoughts here"
+        result = _strip_thinking(content)
+        assert "Thinking..." not in result
+
+    def test_legacy_thinking_process_stripped(self):
+        content = "Thinking Process:\n1. Check the rule list\n2. Sort by precision\nRound-trip has 35%."
+        result = _strip_thinking(content)
+        assert "Thinking Process:" not in result
+        assert "Round-trip" in result

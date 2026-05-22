@@ -114,7 +114,7 @@ RULES — follow these exactly:
    If the user says "N clusters", "into N", "only N", or "I want N" (e.g. "cluster into 3", "I only want 2 clusters"),
    set n_clusters=N exactly in the tool call. Do NOT ignore the user's requested count and do NOT default to 4.
 8. If the user asks to prepare or refresh the raw data — call prepare_segmentation_data first.
-9. After receiving tool results, copy the cluster stats verbatim, then add ONE sentence describing the highest-risk cluster based solely on the numbers in the tool result. Do NOT suggest thresholds, dollar cutoffs, or monitoring actions.
+9. After receiving segment_customers tool results: output ONE ### header, then ONE per-cluster bullet summarising key stats (customer count, avg weekly transactions, monthly volume, account age, alerts, SARs). Do NOT copy the raw stats block verbatim — write compact human-readable bullets. After follow-up queries that include [PREVIOUS CLUSTERING RESULT]: answer in ONE sentence using exact values from that block. Do NOT suggest thresholds, dollar cutoffs, or monitoring actions.
 10. If the user asks to show specific clusters (e.g. "show only cluster 3", "highest risk",
     "top 2 high risk", "low activity clusters"):
     - Identify which cluster number(s) match the request from the stats
@@ -128,7 +128,7 @@ RULES — follow these exactly:
 12. ONLY use numbers that appear in the tool result. Do NOT invent, estimate, or calculate new numbers.
 13. Do NOT invent threshold values, dollar amounts, or cutoffs. Only reference numbers explicitly present in the tool result. Do NOT suggest specific threshold values (e.g. "$250K", "< 80,000") unless they appear verbatim in the tool result.
 14. If the user asks which cluster to set a threshold for, or asks for threshold recommendations per cluster — do NOT invent values. Tell the user to use the threshold_tuning or sar_backtest tools with the relevant segment instead.
-15. If a [PREVIOUS CLUSTERING RESULT] block is provided in the context AND the user is asking to characterize, describe, compare, or explain a specific cluster — answer from that data WITHOUT calling any tool. Compare the named cluster's stats (avg_trxn_amt, monthly volume, balance, account age) against the other clusters to identify what makes it distinctive. Name the risk profile in one sentence. Do NOT re-run clustering.\
+15. If a [PREVIOUS CLUSTERING RESULT] block is provided in the context — answer from that data WITHOUT calling any tool for ANY of the following: (a) characterize, describe, compare, or explain a specific cluster; (b) identify which cluster has the highest or lowest value for any attribute (age, income, balance, transaction volume, account age, tenure); (c) rank clusters by any attribute; (d) answer questions about the oldest, youngest, richest, most active, or least active segment. Read the attribute values from the stats block and compare directly. Do NOT re-run clustering to answer attribute or ranking questions — the [PREVIOUS CLUSTERING RESULT] already has the data. For comparison questions ("how does cluster X compare to cluster Y"): compare each cluster's stats (avg_trxn_amt, monthly volume, balance, account age, customer count) attribute by attribute to identify what makes each distinctive — write a full multi-sentence comparison. Rule 9's one-sentence limit does NOT apply here.
 """
 
 

@@ -13,18 +13,28 @@ stop_event = threading.Event()
 
 
 def _strip_thinking(text: str) -> str:
-    """Strip Gemma 4 'Thinking Process:' chain-of-thought preamble."""
-    if not text.startswith("Thinking Process:"):
+    """Strip Gemma 4 thinking preamble from Ollama responses (safety net — think:false preferred)."""
+    if not text:
         return text
-    lines = text.splitlines()
-    last_num_idx = -1
-    for i, line in enumerate(lines):
-        if re.match(r"^\d+\.", line.strip()):
-            last_num_idx = i
-    if last_num_idx == -1:
-        return "\n".join(lines[1:]).strip()
-    answer = "\n".join(lines[last_num_idx + 1:]).strip()
-    return answer if answer else text
+    # Current Ollama format: "Thinking...\n...\n...done thinking.\n\n<answer>"
+    if text.startswith("Thinking..."):
+        marker = "...done thinking."
+        idx = text.find(marker)
+        if idx != -1:
+            return text[idx + len(marker):].strip()
+        return "\n".join(text.splitlines()[1:]).strip()
+    # Legacy format: "Thinking Process:\n1. ...\n<answer>"
+    if text.startswith("Thinking Process:"):
+        lines = text.splitlines()
+        last_num_idx = -1
+        for i, line in enumerate(lines):
+            if re.match(r"^\d+\.", line.strip()):
+                last_num_idx = i
+        if last_num_idx == -1:
+            return "\n".join(lines[1:]).strip()
+        answer = "\n".join(lines[last_num_idx + 1:]).strip()
+        return answer if answer else text
+    return text
 
 # Sentinel raised by _stream_llm when stop_event fires mid-stream
 class _Stopped(Exception):
@@ -146,6 +156,27 @@ def _parse_tool_call_from_content(content: str) -> tuple | None:
         except json.JSONDecodeError:
             pass
 
+    # Format 1b: vLLM Gemma4 compact — call:name{key:val,key:val} (no newline, no JSON quotes)
+    m = re.search(r'\bcall:(\w+)\{([^}]*)\}', content)
+    if m:
+        raw_name = m.group(1)
+        name = _normalize_tool_name(raw_name)
+        args = {}
+        for pair in m.group(2).split(','):
+            pair = pair.strip()
+            if ':' in pair:
+                k, v = pair.split(':', 1)
+                k, v = k.strip(), v.strip()
+                try:
+                    args[k] = int(v)
+                except ValueError:
+                    try:
+                        args[k] = float(v)
+                    except ValueError:
+                        args[k] = v
+        print(f"[base_agent] fallback parse (compact call format): {raw_name} → {name}, args={args}")
+        return name, _normalize_args(name, args)
+
     # Format 2: Qwen style — <tool_call>{"name": ..., "arguments": ...}</tool_call>
     m = re.search(r'<tool_call>\s*(\{.*?\})\s*</tool_call>', content, re.DOTALL)
     if m:
@@ -220,6 +251,12 @@ def _parse_tool_call_from_content(content: str) -> tuple | None:
         return name, _normalize_args(name, args)
 
     # Format 5: natural language — "call [the] `tool_name`"
+    # Only match if the captured word is a known tool name or alias — prevents common English
+    # words like "has", "algorithm", "function" from being mistaken for tool calls.
+    _nl_valid_tools = _known_tools | set(_TOOL_NAME_ALIASES.keys()) | {
+        "segment_stats", "cluster_rule_summary", "ofac_screening", "ofac_name_lookup",
+        "sar_backtest",
+    }
     _skip = {"the", "a", "an", "this", "that", "it", "my", "our"}
     for m in re.finditer(
         r'(?:call|use|invoke|using)\s+(?:(?:the|a|an)\s+)?[`"]?(\w+)[`"]?',
@@ -229,6 +266,8 @@ def _parse_tool_call_from_content(content: str) -> tuple | None:
         if raw_name.lower() in _skip:
             continue
         name = _normalize_tool_name(raw_name)
+        if raw_name.lower() not in _nl_valid_tools and name not in _nl_valid_tools:
+            continue
         args = {}
         for km in re.finditer(r'[`"]?(\w+)[`"]?\s*[=:]\s*[`\'"]([^`\'"]+)[`\'"]', content):
             k, v = km.group(1), km.group(2)
@@ -315,11 +354,13 @@ class BaseAgent:
         create_kwargs = dict(
             model=self.model,
             max_tokens=MAX_TOKENS_TOOL,
+            temperature=0,
             messages=messages,
+            extra_body={"think": False},
         )
         if self.tools:
             create_kwargs["tools"] = self.tools
-            create_kwargs["tool_choice"] = "auto"
+            create_kwargs["tool_choice"] = "none"
 
         for iteration in range(MAX_TOOL_ITERATIONS):
             if stop_event.is_set():
@@ -370,8 +411,20 @@ class BaseAgent:
                     name, args = parsed
                     fake_id = f"fallback_{iteration}"
                     structured_calls.append((name, args, fake_id))
-                    # Use a simplified message format compatible with all models
-                    messages.append({"role": "assistant", "content": msg.content})
+                    # Structure with tool_calls so the subsequent tool message is valid OpenAI
+                    # format for both Ollama and vLLM (orphaned tool messages skip in vLLM template)
+                    messages.append({
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [{
+                            "id": fake_id,
+                            "type": "function",
+                            "function": {
+                                "name": name,
+                                "arguments": json.dumps(args),
+                            },
+                        }],
+                    })
 
             # ── Execute tool calls ────────────────────────────────────────────
             if structured_calls:
@@ -426,8 +479,9 @@ class BaseAgent:
                 print(f"[{self.name}] DEBUG — end messages\n")
 
             else:
-                # No tool call found — final text response
-                return _strip_thinking(msg.content or ""), chart_results
+                # No tool call found — final text response.
+                final_text = msg.content or ""
+                return _strip_thinking(final_text), chart_results
 
         # Exceeded max iterations — return whatever text we have
         print(f"[{self.name}] WARNING: hit MAX_TOOL_ITERATIONS ({MAX_TOOL_ITERATIONS})")

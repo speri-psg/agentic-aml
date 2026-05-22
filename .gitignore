@@ -34,3 +34,9 @@ Thumbs.db
 # Generated data files
 docs/ds_segmentation_data.csv
 docs/ss_segmentation_data.csv
+
+# Model weights and training artifacts (download separately)
+data/*.gguf
+data/*.bin
+data/gemma4_aml_vastai.ipynb
+data/Modelfile.aml

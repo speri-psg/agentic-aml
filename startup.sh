@@ -2,19 +2,19 @@
 set -e
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-HF_REPO="speri420/aria-v3"
-GGUF_FILE="aria-v3-q8.gguf"
+HF_REPO="speri420/aria-v4"
+GGUF_FILE="aria-v4-q8.gguf"
 GGUF_PATH="/data/${GGUF_FILE}"
-MODEL_NAME="aria-v3"
+MODEL_NAME="aria-v4"
 
 # Bind Ollama directly to the HF Space public port so the local Dash app can
 # reach it at: OLLAMA_BASE_URL=https://speri420-agentic-aml-demo.hf.space/v1
-export OLLAMA_HOST=0.0.0.0:7860
+export OLLAMA_HOST=0.0.0.0:11434
 
 # ── 1. Start Ollama daemon ────────────────────────────────────────────────────
 ollama serve &
-echo "[startup] Ollama starting on port 7860..."
-until curl -s http://localhost:7860/api/tags > /dev/null 2>&1; do
+echo "[startup] Ollama starting on port 11434..."
+until curl -s http://localhost:11434/api/tags > /dev/null 2>&1; do
     sleep 2
 done
 echo "[startup] Ollama ready."
@@ -40,7 +40,7 @@ fi
 # ── 3. Write Modelfile ────────────────────────────────────────────────────────
 python3 << 'PYEOF'
 SYSTEM_PROMPT = (
-    "You are ARIA, an AML (Anti-Money Laundering) analytics AI assistant built by Xceed. "
+    "You are ARIA, an AML (Anti-Money Laundering) analytics AI assistant built by Princeton Strategy Group. "
     "You analyze false positive/false negative trade-offs in AML alert thresholds, "
     "perform customer behavioral segmentation, and interpret clustering results. "
     "Use the available tools to retrieve data, then provide clear, analytical insights. "
@@ -49,7 +49,7 @@ SYSTEM_PROMPT = (
 )
 
 lines = [
-    "FROM /data/aria-v3-q8.gguf",
+    "FROM /data/aria-v4-q8.gguf",
     "",
     "PARAMETER num_ctx 8192",
     "PARAMETER temperature 0.1",
@@ -90,10 +90,10 @@ else
     echo "[startup] Model registered."
 fi
 
-echo "[startup] aria-v2 is live."
+echo "[startup] aria-v4 is live."
 echo "[startup] Connect your local app with:"
 echo "  OLLAMA_BASE_URL=https://speri420-agentic-aml-demo.hf.space/v1"
-echo "  OLLAMA_MODEL=aria-v2"
+echo "  OLLAMA_MODEL=aria-v4"
 
 # Keep the container alive — Ollama is already running in background
 wait

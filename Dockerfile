@@ -18,6 +18,7 @@ ENV OLLAMA_MODELS=/data/ollama_models
 WORKDIR /app
 
 # Install Python dependencies
+ENV UV_HTTP_TIMEOUT=300
 COPY requirements.txt .
 RUN uv pip install -r requirements.txt huggingface_hub
 
