@@ -511,10 +511,10 @@ class OrchestratorAgent:
             if name in _STICKY_SOURCES:
                 self._last_agent = name
             context = ""
-            if last_rule_list:
+            if last_rule_list and name == "threshold":
                 _rule_ctx = last_rule_list[:4000] if len(last_rule_list) > 4000 else last_rule_list
-                context = f"[PREVIOUS RULE LIST]\n{_rule_ctx}\n[END RULE LIST]"
-                print(f"[orchestrator] injecting previous rule list for follow-up ({len(_rule_ctx)} chars):\n{_rule_ctx}\n[END]")
+                context = _rule_ctx
+                print(f"[orchestrator] injecting previous rule list for follow-up ({len(_rule_ctx)} chars)")
             if name == "segmentation":
                 _cluster_ctx = last_cluster_result or last_assistant
                 # If the stored stats are short (alert counts only, no cluster attributes),

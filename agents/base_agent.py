@@ -471,7 +471,7 @@ class BaseAgent:
                     role = m.get("role", "?")
                     content = m.get("content") or ""
                     tc = m.get("tool_calls")
-                    preview = content[:300].replace("\n", "↵") if content else "(no content)"
+                    preview = content[:300].replace("\n", "\\n") if content else "(no content)"
                     if tc:
                         print(f"  [{i}] {role}: [tool_calls={[t['function']['name'] for t in tc]}] {preview}")
                     else:

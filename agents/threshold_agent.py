@@ -338,9 +338,9 @@ RULES — follow these exactly:
 25. If a previous tool call returned an error about an invalid sweep parameter (e.g. "Unknown sweep_param_1" or "Unknown sweep_param_2"), and you asked the user to choose a valid parameter, and the user's reply is a parameter name (e.g. floor_amount, z_threshold, age_threshold, pair_total, ratio_tolerance, time_window, min_transactions, days_required, daily_floor) — do NOT treat it as a new query. Resume the previous rule_2d_sweep or rule_sar_backtest call with the same risk_factor, keeping all valid parameters unchanged and replacing only the invalid one with the user's corrected choice.
 26. For pure definitional or conceptual questions about TP, FP, FN, TN, precision, recall, crossover, threshold tuning, the effect of raising or lowering thresholds on FP/FN counts, or what a 2D grid/sweep shows — answer DIRECTLY using the DEFINITIONS section above and your AML knowledge. Do NOT call any tool. Give a complete explanation: what the concept means, why it matters in AML transaction monitoring, and how it works in practice. No length limit.
 27. For questions about per-cluster adaptive thresholds, how behavioral segmentation improves alert sensitivity, cluster-specific threshold recommendations, or reducing false positives by customer cluster — call cluster_threshold_analysis with segment and threshold_column. Optionally pass n_clusters (default 4) and target_sar_rate (default 0.90). Do NOT call threshold_tuning or sar_backtest for this — cluster_threshold_analysis already computes the uniform baseline internally.
-28. In both cases below, report the top 3 rules unless the user specifies a different count. When the user asks about "highest precision", "best precision", "most precise rules", "top N by precision", or "top precision" — if [PREVIOUS RULE LIST] is already in the context, read the precision=X% values directly from it and sort DESCENDING; otherwise call list_rules first. When the user asks about "lowest precision", "worst precision", "least precise rules", or "bottom N by precision" — sort ASCENDING. Report the requested count (default 3). High precision = high SAR%, low FP ratio. Do NOT sort by FP count. Do NOT confuse "highest precision" with "most false positives" — they are OPPOSITE ends of the performance scale. Rules with the largest FP counts have the LOWEST precision.
+28. In both cases below, report the top 3 rules unless the user specifies a different count. When the user asks about "highest precision", "best precision", "most precise rules", "top N by precision", or "top precision" — if a RULE LIST block (=== RULE LIST === ... === END RULE LIST ===) is already in the context, read the precision=X% values directly from it and sort DESCENDING; otherwise call list_rules first. When the user asks about "lowest precision", "worst precision", "least precise rules", or "bottom N by precision" — sort ASCENDING. Report the requested count (default 3). High precision = high SAR%, low FP ratio. Do NOT sort by FP count. Do NOT confuse "highest precision" with "most false positives" — they are OPPOSITE ends of the performance scale. Rules with the largest FP counts have the LOWEST precision.
 29. For questions about which rules support a specific sweep parameter (e.g., "which rules have z_threshold", "which rules have floor_amount", "which rules can be swept") — filter the RULE INVENTORY above directly; do NOT call list_rules for this. For questions about what a parameter means or does — answer directly: z_threshold is the std-dev multiplier above the customer's activity mean; floor_amount is the minimum transaction amount (or sum) to trigger the rule; daily_floor is the minimum daily cash amount for a qualifying day; ratio_tolerance is the max deviation of the out/in ratio from 1.0; pair_total is the minimum combined in+out pair amount; days_required is the minimum number of qualifying days in the observation window; time_window is the aggregation window in days; min_transactions is the minimum number of transactions in the window; min_counterparties is the minimum number of distinct counterparties; return_window is the maximum days between the outgoing and return leg; age_threshold is the minimum customer age to trigger.
-30. If [PREVIOUS RULE LIST] appears in the context, it contains the live SAR/FP performance data for all AML rules from the most recent list_rules call. It is the authoritative source — do NOT call list_rules again, and do NOT use memorized or assumed values. For ANY ranking, sorting, or filtering query ("top N by precision", "bottom N by precision", "most SARs", "fewest SARs", "highest FP", "lowest FP", "how about the top 3", "how about the bottom 3") — read the exact numbers from [PREVIOUS RULE LIST] and compute the answer from those values only.
+30. If a RULE LIST block (=== RULE LIST === ... === END RULE LIST ===) is present in the context, it contains live SAR/FP performance data for all AML rules. It is the authoritative source — do NOT call list_rules again, do NOT use memorized or assumed values. For ANY ranking, sorting, or filtering query ("top N by precision", "bottom N by precision", "most SARs", "fewest SARs", "highest FP", "lowest FP", "how about the top 3", "how about the bottom 3") — enumerate each rule and its value from that block, sort, then report.
 """
 
 
@@ -365,8 +365,42 @@ class ThresholdAgent(BaseAgent):
             tools=TOOLS,
         )
 
+    def _stream_llm(self, **kwargs):
+        # Enable thinking for ranking/sorting tasks (16-rule sort requires chain-of-thought)
+        if "extra_body" in kwargs:
+            kwargs["extra_body"] = {**kwargs["extra_body"], "think": True}
+        else:
+            kwargs["extra_body"] = {"think": True}
+        return super()._stream_llm(**kwargs)
+
+    def _run_with_rule_list(self, query: str, rule_list: str, history: list) -> tuple:
+        """Answer a ranking/sorting query using rule list data embedded in the user message.
+
+        Sends: system → history → user("Based on the following data: [rules]\n\n{query}")
+        No tool calls — the data is inline so the model answers directly.
+        """
+        from .base_agent import _strip_thinking, MAX_TOKENS_TOOL
+        user_content = (
+            f"Based on the following AML rule performance data, answer the question below. "
+            f"Do not call any tools — use only the data provided.\n\n"
+            f"{rule_list}\n\n"
+            f"Question: {query}"
+        )
+        # No system prompt here — Rule 1 ("ALWAYS call a tool") suppresses context reading.
+        # Without it, the base model reads from inline data exactly as in Ollama CLI.
+        messages = list(history) + [{"role": "user", "content": user_content}]
+        msg = self._stream_llm(
+            model=self.model,
+            max_tokens=MAX_TOKENS_TOOL,
+            temperature=0,
+            messages=messages,
+        )
+        return _strip_thinking(msg.content or ""), []
+
     def run(self, query: str, tool_executor, policy_context: str = "", history: list = None) -> tuple:
         query_lower = query.lower().replace("-", "_").replace(" ", "_")
         if any(p in query_lower for p in _INVALID_PARAMS):
             return _REJECTION_MSG, []
+        if policy_context and "=== RULE LIST ===" in policy_context:
+            return self._run_with_rule_list(query, policy_context, history or [])
         return super().run(query, tool_executor, policy_context, history)
