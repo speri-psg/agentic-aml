@@ -360,9 +360,14 @@ def load_rule_sweep_data():
         df = normalize_columns(df, verbose=True)
     except Exception:
         pass
-    # Normalise customer_id column name (synth uses aria_customer_id)
-    if "aria_customer_id" in df.columns and "customer_id" not in df.columns:
-        df = df.rename(columns={"aria_customer_id": "customer_id"})
+    # Normalise aria_* prefixed columns (aria_alerts.csv uses aria_ prefix)
+    aria_renames = {
+        "aria_customer_id":  "customer_id",
+        "aria_risk_factor":  "risk_factor",
+        "aria_is_sar":       "is_sar",
+        "aria_customer_type": "customer_type",
+    }
+    df = df.rename(columns={k: v for k, v in aria_renames.items() if k in df.columns})
     # Derive dynamic_segment from customer_type if missing (needed for cluster filter)
     if "dynamic_segment" not in df.columns and "customer_type" in df.columns:
         df["dynamic_segment"] = df["customer_type"].str.upper().map(
@@ -378,21 +383,64 @@ def load_rule_sweep_data():
 def list_rules_text(df):
     """
     Pre-computed text listing available rules with SAR/FP counts and sweep options.
-    """
-    lines = ["=== RULE LIST ==="]
-    lines.append("Available AML rules with SAR/FP performance (detailed table shown in chart below):")
-    lines.append("NOTE: This is the COMPLETE list of rules in the system. Do NOT add or infer any rules not listed here.")
 
-    for _, entry in RULE_CATALOGUE.items():
+    Lines are emitted in DESCENDING precision order (not catalog order). Catalog
+    order was forcing the model to do visual scanning across 21 entries to pick
+    "highest/lowest by metric", which it does poorly — modern-typology rules
+    (17, 18, 19, 20) and bottom-precision rules deep in the list got attention-
+    dropped and produced self-contradictory rankings (e.g., 'Rule 17 highest at
+    46.2%' alongside 'Rule 18 at 57.7%' in the same response). Sorting puts
+    answer-relevant items at positions 1-3 so the model reads them off rather
+    than computing them.
+
+    NOTE: rules keep their canonical 'Rule N:' ID (catalog index), only the
+    line ORDER changes. This is presentation, not pre-computed answers — the
+    model still picks the top/bottom from precision values itself.
+    """
+    # Collect per-rule stats once with catalog index attached.
+    rule_stats = []
+    for i, (_, entry) in enumerate(RULE_CATALOGUE.items(), 1):
         rf   = entry["name"]
         grp  = df[df["risk_factor"] == rf] if df is not None else pd.DataFrame()
         n    = len(grp)
         sar  = int(grp["is_sar"].sum()) if n > 0 else 0
         fp   = int((grp["is_sar"] == 0).sum()) if n > 0 else 0
-        prec = f"{round(100*sar/(sar+fp),1)}%" if (sar + fp) > 0 else "n/a"
+        prec_val = round(100 * sar / (sar + fp), 1) if (sar + fp) > 0 else None
+        prec_str = f"{prec_val}%" if prec_val is not None else "n/a"
         sweep_keys = ", ".join(entry["sweep_params"].keys())
-        lines.append(f"  {rf}: alerts={n}, SAR={sar}, FP={fp}, precision={prec}, sweep_params=[{sweep_keys}]")
+        rule_stats.append({
+            "num": i, "rf": rf, "alerts": n, "sar": sar, "fp": fp,
+            "precision_val": prec_val if prec_val is not None else -1,
+            "precision_str": prec_str, "sweep_keys": sweep_keys,
+        })
 
+    # Sort by precision descending. Ties keep catalog order via stable sort.
+    rule_stats.sort(key=lambda r: -r["precision_val"])
+
+    lines = ["=== RULE LIST ==="]
+    lines.append("Available AML rules with SAR/FP performance (detailed table shown in chart below):")
+    lines.append(
+        "NOTE: This is the COMPLETE list of rules. Lines are presented in "
+        "DESCENDING ORDER OF PRECISION (highest first). Rule numbers are "
+        "catalog IDs (not line positions). Do NOT add or infer any rules not listed here."
+    )
+
+    for r in rule_stats:
+        lines.append(
+            f"  Rule {r['num']}: {r['rf']}: alerts={r['alerts']}, "
+            f"SAR={r['sar']}, FP={r['fp']}, precision={r['precision_str']}, "
+            f"sweep_params=[{r['sweep_keys']}]"
+        )
+
+    # Note: previously had an analytical nudge ("be analytical and double check
+    # the ranking order and parameters") here. Removed 2026-06-08 — observed in
+    # production that 'double check the ranking order' was triggering visible
+    # fake-rigor: model produced an initial answer, said 'reordering by lowest
+    # precision', then settled on a DIFFERENT wrong answer. Both attempts shown
+    # to the user. The 'double check' instruction caused doubt-and-redo without
+    # new information; the model just re-ran the same attention pattern and
+    # landed at a different position. Sort + simple NOTE does the heavy lifting;
+    # extra reasoning hints induce dance, not accuracy.
     lines.append("=== END RULE LIST ===")
     return "\n".join(lines)
 
@@ -563,6 +611,14 @@ def compute_rule_sar_sweep(df, risk_factor_keyword, sweep_param=None, max_rows=M
     lines.append(f"At the highest value ({last[0]:,.2f}): TP={last[1]}, FP={last[2]}, FN={last_fn}, TN={last_tn}, precision={_prec(last[1], last[2])}%.")
     lines.append("=== END RULE SWEEP ===")
     lines.append("(Detailed sweep table shown in the chart below.)")
+    lines.append("")
+    lines.append(
+        "Report each metric on its own — NEVER combine two numbers with '/'. "
+        "Wrong: 'TP rate at 780/16.6%' (TP count joined with precision), "
+        "'TP rate to 780/90%' (TP count joined with target threshold). "
+        "Right: 'TP=780, precision=16.6%' or 'At floor=90,000: TP rate=78.6%, "
+        "precision=16.6%'. Each value stands alone with its label."
+    )
 
     return "\n".join(lines)
 
@@ -849,7 +905,8 @@ def compute_rule_2d_sweep(df, risk_factor_keyword, param1=None, param2=None):
         )
 
     lines.append("=== END 2D SWEEP ===")
-    lines.append("(Heatmap shown in the chart below.)")
+    lines.append("(Heatmap shown in the chart below. The ranked table beside it shows the parameter combinations closest to the current condition.)")
+    lines.append("Suggest to the user: click any heatmap cell to drill into the customer-level TP/FP/FN/TN breakdown for that exact parameter combination.")
 
     return "\n".join(lines), grid_dict
 

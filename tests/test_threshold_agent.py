@@ -11,7 +11,22 @@ with patch("openai.OpenAI", return_value=MagicMock()):
         _INVALID_PARAMS,
         _REJECTION_MSG,
         _N_RULES,
+        _RANKING_QUERY_TERMS,
     )
+
+
+# ── Ranking query terms ────────────────────────────────────────────────────────
+
+class TestRankingQueryTerms:
+    def test_the_same_in_ranking_terms(self):
+        assert "the same" in _RANKING_QUERY_TERMS
+
+    def test_same_by_in_ranking_terms(self):
+        assert "same by" in _RANKING_QUERY_TERMS
+
+    def test_core_terms_present(self):
+        for term in ("top", "bottom", "highest", "lowest", "most", "least"):
+            assert term in _RANKING_QUERY_TERMS
 
 
 # ── Invalid parameter rejection ────────────────────────────────────────────────
@@ -185,40 +200,33 @@ class TestToolsDefinition:
 # ── System prompt validation ───────────────────────────────────────────────────
 
 class TestSystemPrompt:
-    def test_exactly_16_rules_stated(self):
-        assert f"exactly {_N_RULES} AML detection rules" in SYSTEM_PROMPT
+    """The production_switchover (2026-06-02) replaced the multi-thousand-char
+    rule-based prompt (Rules 1-29) with a one-line directive. Behavioral
+    instruction now lives in training examples + tool definitions.
+    See feedback_instruction_placement / production_switchover_plan."""
 
-    def test_default_segment_is_business(self):
-        assert "default to Business" in SYSTEM_PROMPT
+    def test_prompt_is_minimal(self):
+        # The whole prompt should be short (under 600 chars). Previously it was 16K+.
+        # Was <200 until 2026-06-08 when the closest-match shorthand instruction
+        # was added (commit 7a50911) to handle 'Crypto'/'Mule'/etc. → canonical
+        # rule name resolution. Still 38x smaller than the pre-switchover prompt.
+        assert len(SYSTEM_PROMPT) < 600
 
-    def test_default_column_is_avg_trxns_week(self):
-        assert "default to AVG_TRXNS_WEEK" in SYSTEM_PROMPT
+    def test_prompt_directs_to_data(self):
+        # Minimal prompt instructs the model to ground answers in tool output.
+        assert "data" in SYSTEM_PROMPT.lower()
 
-    def test_invalid_params_listed_in_system_prompt(self):
-        for p in ("threshold_min", "threshold_max", "threshold_step"):
-            assert p in SYSTEM_PROMPT
+    def test_prompt_does_not_contain_obsolete_rule_format(self):
+        # Old prompts had "Rule 1:", "Rule 16:", etc. and were rule-list-driven.
+        for obsolete in (
+            "Rule 1:", "Rule 16:", "OVERRIDE RULE 16",
+            "default to Business", "default to AVG_TRXNS_WEEK",
+            "PRE-COMPUTED", "cluster_rule_summary",
+        ):
+            assert obsolete not in SYSTEM_PROMPT
 
-    def test_pre_computed_copy_rule_present(self):
-        assert "copy that section word-for-word" in SYSTEM_PROMPT or \
-               "PRE-COMPUTED" in SYSTEM_PROMPT
-
-    def test_english_only_rule_present(self):
-        assert "English" in SYSTEM_PROMPT
-
-    def test_valid_columns_mentioned(self):
-        for col in ("AVG_TRXNS_WEEK", "AVG_TRXN_AMT", "TRXN_AMT_MONTHLY"):
-            assert col in SYSTEM_PROMPT
-
-    def test_valid_segments_mentioned(self):
-        assert "Business" in SYSTEM_PROMPT
-        assert "Individual" in SYSTEM_PROMPT
-
-    def test_cluster_rule_summary_rule_present(self):
-        assert "cluster_rule_summary" in SYSTEM_PROMPT
-
-    def test_cluster_rule_summary_rule_forbids_looping(self):
-        # Rule 24 must direct the model to cluster_rule_summary, not loop rule_sar_backtest
-        assert "rule_sar_backtest" in SYSTEM_PROMPT
-        # The rule should mention NOT looping (either "Do NOT" or "not")
-        prompt_lower = SYSTEM_PROMPT.lower()
-        assert "do not" in prompt_lower or "not" in prompt_lower
+    def test_rule_count_constant_matches_catalogue(self):
+        # _N_RULES is exposed for downstream code; verify it tracks the catalogue
+        # (16 classic + 5 modern typology = 21).
+        import lambda_rule_analysis as ra
+        assert _N_RULES == len(ra.RULE_CATALOGUE)

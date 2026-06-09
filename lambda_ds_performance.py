@@ -304,9 +304,15 @@ def add_sub_plots(fig, subplot, row_id, col_id, x_title, y_title):
 
 def perform_clustering(df, customer_type=None, n_clusters=4):
     """
-    Cluster active customers (avg_num_trxns > 0) using numeric + categorical features.
-    Inactive accounts are assigned to a 'No Activity' cluster (index = n_clusters).
+    Cluster customers (avg_num_trxns > 0) using numeric + categorical features.
+    Inactive customers are excluded entirely.
     Returns (scatter_fig, stats_text, df_combined).
+
+    Clustering happens at the CUSTOMER level, not per account-relationship row.
+    The input ds_segmentation_synth.csv has one row per (account, customer)
+    relationship; we aggregate to one row per customer_id before KMeans so
+    cluster totals match the banner customer counts (20K Business / 80K Individual)
+    rather than the 52K/320K joint-relationship row counts.
     """
     from sklearn.cluster import KMeans
     from sklearn.preprocessing import StandardScaler
@@ -322,7 +328,39 @@ def perform_clustering(df, customer_type=None, n_clusters=4):
 
     seg_label = customer_type or "All"
 
-    # ── Keep only accounts with transaction history ─────────────────────
+    # ── Aggregate to one row per customer_id ─────────────────────────────
+    # Risk is assessed per customer, not per account-holder relationship.
+    if 'customer_id' in df_work.columns:
+        _num_agg = {
+            'avg_num_trxns':       'sum',   # total weekly txns across all customer's accounts
+            'avg_weekly_trxn_amt': 'sum',   # total weekly $ across all accounts
+            'trxn_amt_monthly':    'sum',
+            'total_trxn_amt':      'sum',
+            'cashin_count':        'sum',
+            'cashout_count':       'sum',
+            'INCOME':              'max',   # constant per customer
+            'CURRENT_BALANCE':     'sum',   # combined balance across accounts
+            'ACCT_AGE_YEARS':      'max',   # oldest account = tenure
+            'AGE':                 'max',   # constant per customer
+            'cashin_ratio':        'mean',
+        }
+        _num_agg = {k: v for k, v in _num_agg.items() if k in df_work.columns}
+        _mode_cols = [c for c in [
+            'ACCOUNT_TYPE', 'product', 'product_name', 'GENDER', 'marital_status',
+            'AGE_CATEGORY', 'INCOME_BAND', 'ACCT_OPEN_CHANNEL', 'NNM', 'OFAC', '314b',
+            'CITIZENSHIP', 'RESIDENCY_COUNTRY', 'ACCOUNT_AGE_CATEGORY',
+            'BUSINESS_SIZE', 'REVENUE_BAND', 'OCCUPATION_GROUP', 'CRYPTO_USER',
+            'customer_type', 'dynamic_segment',
+        ] if c in df_work.columns]
+        def _mode(s):
+            m = s.dropna()
+            return m.mode().iloc[0] if len(m.mode()) else (m.iloc[0] if len(m) else None)
+        _cat_agg = {c: _mode for c in _mode_cols}
+        df_work = (df_work
+                   .groupby('customer_id', as_index=False)
+                   .agg({**_num_agg, **_cat_agg}))
+
+    # ── Keep only customers with transaction history ─────────────────────
     if 'avg_num_trxns' in df_work.columns:
         df_active = df_work[df_work['avg_num_trxns'].fillna(0) > 0].copy()
     else:
@@ -335,13 +373,53 @@ def perform_clustering(df, customer_type=None, n_clusters=4):
         'INCOME', 'CURRENT_BALANCE', 'ACCT_AGE_YEARS', 'AGE'
     ] if c in df_active.columns]
 
-    cat_cols = [c for c in [
-        'ACCOUNT_TYPE', 'GENDER', 'AGE_CATEGORY', 'ACCT_OPEN_CHANNEL',
-        'NNM', 'OFAC', '314b', 'CITIZENSHIP', 'RESIDENCY_COUNTRY'
-    ] if c in df_active.columns]
+    # CITIZENSHIP / RESIDENCY_COUNTRY are demographic ID-like: 99.5% US for
+    # Business customers, ~5 rare non-US values. One-hot encoded with
+    # drop_first=True they produced rare binary dimensions that StandardScaler
+    # blew up to ~8σ when 1 — dominating K-Means distance and producing
+    # country-based clusters (Business C2=Australia, C3=Switzerland, etc.)
+    # instead of behavioral segmentation. Excluded from clustering features;
+    # still available as descriptive metadata in df_clustered.
+    #
+    # Segment-aware enrichers: REVENUE_BAND / BUSINESS_SIZE only apply to
+    # Business; OCCUPATION_GROUP / INCOME_BAND / marital_status only to
+    # Individual. Including them in the wrong segment creates a giant "None"
+    # one-hot dimension that reproduces the rare-binary scaling pitfall.
+    # When clustering "All", stick to segment-agnostic enrichers only.
+    _base_cats = ['ACCOUNT_TYPE', 'ACCT_OPEN_CHANNEL', 'NNM', 'OFAC', '314b']
+    _seg_agnostic_cats = ['product', 'CRYPTO_USER', 'ACCOUNT_AGE_CATEGORY']
+    if customer_type == "Business":
+        _seg_cats = ['REVENUE_BAND', 'BUSINESS_SIZE']
+    elif customer_type == "Individual":
+        _seg_cats = ['OCCUPATION_GROUP', 'INCOME_BAND', 'GENDER', 'AGE_CATEGORY', 'marital_status']
+    else:
+        _seg_cats = []
+    cat_cols = [c for c in (_base_cats + _seg_agnostic_cats + _seg_cats)
+                if c in df_active.columns]
 
     df_encoded = pd.get_dummies(df_active[cat_cols], drop_first=True) if cat_cols else pd.DataFrame(index=df_active.index)
-    X_num   = df_active[numeric_cols].fillna(df_active[numeric_cols].median())
+    X_num   = df_active[numeric_cols].fillna(df_active[numeric_cols].median()).copy()
+
+    # ── Tail-aware preprocessing of monetary features ────────────────────
+    # The raw monetary features are heavy-tailed lognormal (Business INCOME
+    # CV=461%, trxn amounts CV~107%). StandardScaler on raw values lets a
+    # handful of extreme customers dominate the scaled variance, pushing
+    # K-Means toward tiny outlier-isolation clusters (e.g. 84%/15%/1%/0.4%)
+    # instead of behavioral segmentation. Winsorize INCOME at the 99th
+    # percentile to cap the billionaire outliers, then log1p the four
+    # monetary features so the bulk distribution dominates instead of the
+    # extreme tail. Display stats elsewhere still use raw values from
+    # df_active — only the clustering feature space is transformed.
+    _LOG_COLS = ['avg_weekly_trxn_amt', 'trxn_amt_monthly', 'CURRENT_BALANCE', 'INCOME']
+    _WINSORIZE_COLS = ['INCOME']
+    for col in _WINSORIZE_COLS:
+        if col in X_num.columns:
+            cap = X_num[col].quantile(0.99)
+            X_num[col] = X_num[col].clip(upper=cap)
+    for col in _LOG_COLS:
+        if col in X_num.columns:
+            X_num[col] = np.log1p(X_num[col].clip(lower=0))
+
     X       = pd.concat([X_num.reset_index(drop=True), df_encoded.reset_index(drop=True)], axis=1).fillna(0)
     feature_cols = list(X.columns)
 
@@ -385,7 +463,7 @@ def perform_clustering(df, customer_type=None, n_clusters=4):
     fig = px.scatter(
         scatter_df, x='PC1', y='PC2', color='Cluster',
         category_orders={'Cluster': cluster_order},
-        title=f"Dynamic Segmentation Clustering — {seg_label} ({n_clusters} clusters, active accounts only)",
+        title=f"Dynamic Segmentation Clustering — {seg_label} ({n_clusters} clusters, active customers only)",
         labels={
             'PC1': f'PC1 ({var1:.1f}% variance)',
             'PC2': f'PC2 ({var2:.1f}% variance)',
@@ -413,7 +491,7 @@ def perform_clustering(df, customer_type=None, n_clusters=4):
     n_cat_encoded = len(df_encoded.columns)
     stats_lines = [
         f"=== CLUSTER STATS ===",
-        f"Segment: {seg_label} | Active accounts: {len(df_active):,} (excluded {len(df_work) - len(df_active):,} with no transactions)",
+        f"Segment: {seg_label} | Active customers: {len(df_active):,} (excluded {len(df_work) - len(df_active):,} with no transactions)",
         f"Clusters: {n_clusters} | Features: {n_num} numeric + {n_cat_encoded} encoded categorical ({len(cat_cols)} original)",
         f"PCA variance explained: PC1={var1:.1f}%, PC2={var2:.1f}%",
         "",
@@ -429,7 +507,7 @@ def perform_clustering(df, customer_type=None, n_clusters=4):
         c   = df_active[df_active['cluster'] == i]
         pct = 100 * len(c) / total_active if total_active > 0 else 0
         stats_lines.append(f"**Cluster {i+1}**")
-        stats_lines.append(f"- Customers: **{len(c):,}** ({pct:.1f}% of active accounts)")
+        stats_lines.append(f"- Customers: **{len(c):,}** ({pct:.1f}% of active customers)")
         for col in numeric_cols:
             if col in _skip_cols:
                 continue
@@ -459,10 +537,14 @@ _DIM_EXCLUDE = {
     'income', 'current_balance', 'acct_age_years', 'age',
     'total_trxn_amt', 'cashout_count', 'sar_score', 'alert_count',
     'customer_type',  # used as the segment split level, not a sub-dimension
+    # Raw NAICS / verbose product names hide the more useful bucketed dims:
+    'product_name',    # use product (shorter, same info)
+    'naics',           # use NAICS_BUCKET if we ever add one
+    'type',            # generic relationship type — too sparse
 }
 
 
-def discover_dims(df, segment=None, availability=0.70, max_cardinality=20):
+def discover_dims(df, segment=None, availability=0.70, max_cardinality=25, max_dims=5):
     """
     Discover categorical columns suitable as treemap dimensions from df.
 
@@ -472,6 +554,7 @@ def discover_dims(df, segment=None, availability=0.70, max_cardinality=20):
     segment        : 'BUSINESS' or 'INDIVIDUAL' — filter df before scanning, or None for all
     availability   : minimum fraction of non-null values required (default 0.70)
     max_cardinality: maximum number of unique values for a column to be considered categorical
+    max_dims       : maximum number of dimensions to return (default 4) — limits treemap depth
 
     Returns
     -------
@@ -495,12 +578,14 @@ def discover_dims(df, segment=None, availability=0.70, max_cardinality=20):
         if avail < availability:
             continue
         n_unique = sub[col].nunique(dropna=True)
-        if 1 < n_unique <= max_cardinality:
+        # Require ≥3 unique values: binary (0/1) columns label cells "0" and "1"
+        # which looks like missing data in the treemap.
+        if 2 < n_unique <= max_cardinality:
             scored.append((col, avail))
 
     # Sort by availability descending so highest-coverage dims come first
     scored.sort(key=lambda x: -x[1])
-    return [col for col, _ in scored]
+    return [col for col, _ in scored][:max_dims]
 
 
 def smartseg_tree_dynamic(df_clustered, seg_label="All", dims=None, df_rule_sweep=None):

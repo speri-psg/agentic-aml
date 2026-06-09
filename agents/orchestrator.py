@@ -10,14 +10,39 @@ Routing is done via LLM classification (single fast API call):
 """
 
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from openai import OpenAI
-print("[orchestrator] MODULE LOADED — v2 with conceptual path", flush=True)
+print("[orchestrator] MODULE LOADED", flush=True)
 
 from .base_agent import OLLAMA_BASE_URL, OLLAMA_MODEL
 from .threshold_agent import ThresholdAgent
 from .segmentation_agent import SegmentationAgent
 from .policy_agent import PolicyAgent
+
+_CONFIRMATION_PHRASES = {
+    "are you sure", "are you certain", "are you confident",
+    "really", "really?", "is that right", "is that correct",
+    "double check", "double-check", "can you verify", "can you confirm",
+    "are you sure about that", "are you sure about this",
+    "you sure", "you sure?",
+}
+
+# Cluster-filter directive — appended to segmentation user query when the user is asking
+# the app to display only specific cluster(s). Moved out of the segmentation system prompt
+# (Rule 10) per feedback_instruction_placement — data-turn cues beat system rules.
+DISPLAY_CLUSTERS_DIRECTIVE = (
+    "\n\nOn the very last line of your response, write exactly:\n"
+    "DISPLAY_CLUSTERS: N\n"
+    "where N is a comma-separated list of cluster numbers (e.g. DISPLAY_CLUSTERS: 4 "
+    "or DISPLAY_CLUSTERS: 1,3). Do NOT include any other text on that line."
+)
+
+_CLUSTER_FILTER_PATTERNS = re.compile(
+    r"\b(show only|highest[- ]risk|lowest[- ]risk|low activity|high activity|"
+    r"top \d+|bottom \d+|filter (?:to|for) cluster)\b",
+    re.IGNORECASE,
+)
 
 def _is_elliptical(query: str) -> bool:
     """True if query is a short/elliptical continuation that lacks standalone routing signal."""
@@ -30,10 +55,25 @@ def _is_elliptical(query: str) -> bool:
         "youngest", "oldest", "largest", "smallest", "fewest",
     ]):
         return True
+    # Confirmation/skepticism phrases always inherit context from prior turn
+    if q.rstrip("?") in {p.rstrip("?") for p in _CONFIRMATION_PHRASES}:
+        return True
     return False
 
 
 _CLASSIFY_SYSTEM = """\
+You are a routing classifier for ARIA. Given a user query, respond with one or more of these labels (comma-separated, no other text):
+  threshold    — user wants to RUN analysis on OUR LOCAL DATA: FP/FN trade-offs, SAR catch rates, rules, rule performance, transaction stats, or rule-level sweeps
+  segmentation — user wants to RUN K-Means clustering or alert distribution
+  ofac         — user wants to RUN OFAC sanctions screening
+  greeting     — query is a greeting or social pleasantry
+  out_of_scope — query is not related to any of the above
+  policy       — user is asking a GENERAL KNOWLEDGE question about ARIA, AML, regulations, definitions, or concepts
+Output ONLY the label(s), comma-separated. No explanation.\
+"""
+
+# Legacy few-shot prompt kept for diagnostic / rollback comparison only.
+_CLASSIFY_SYSTEM_LEGACY = """\
 You are a routing classifier for ARIA. Given a user query, respond with \
 one or more of these labels (comma-separated, no other text):
 
@@ -148,23 +188,23 @@ Key distinction:
 - "Can you send this to my compliance team?" → out_of_scope  (action request, not an AML analysis task)
 - "Can you email this to someone?" → out_of_scope
 - "Can you export this as a PDF?" → out_of_scope
-- "What is a false positive?" → threshold  (FP/FN definition is a threshold concept, not policy)
-- "What is a false negative?" → threshold
-- "What is the difference between FP and FN?" → threshold
-- "Explain false positives in AML monitoring" → threshold
-- "What does FP mean?" → threshold
-- "Can you explain false positives and false negatives?" → threshold
-- "What is a 2D grid?" → threshold  (2D grid = rule_2d_sweep — a threshold tool concept)
-- "What is a 2D sweep?" → threshold
-- "How does a 2D grid work?" → threshold
+- "What is a false positive?" → policy  (definitional question — base model gives better educational answer)
+- "What is a false negative?" → policy
+- "What is the difference between FP and FN?" → policy
+- "Explain false positives in AML monitoring" → policy
+- "What does FP mean?" → policy
+- "Can you explain false positives and false negatives?" → policy
+- "What is a 2D grid?" → policy  (definitional/conceptual question)
+- "What is a 2D sweep?" → policy
+- "How does a 2D grid work?" → policy
 - "Are you ARIA?" → greeting  (identity question — not an AML topic)
 - "What is your name?" → greeting
 - "Who are you?" → greeting
 - "Ahoy!" → greeting
 - "Ahoy matey!" → greeting
-- "What are true positives in AML monitoring?" → threshold  (TP/TN definitions are threshold/confusion-matrix concepts)
-- "What are true negatives?" → threshold
-- "What is the difference between TP and TN?" → threshold
+- "What are true positives in AML monitoring?" → policy  (definitional question — base model gives better educational answer)
+- "What are true negatives?" → policy
+- "What is the difference between TP and TN?" → policy
 - "What is OFAC?" → policy  (definition question — NOT a screening request)
 - "What does OFAC stand for?" → policy
 - "My dog OFAC met a cat the other day" → out_of_scope  (OFAC here is a name, not AML topic)
@@ -239,209 +279,232 @@ class OrchestratorAgent:
 
     def _route(self, query: str, last_assistant: str = "") -> list:
         """LLM-based routing — classify query into agent labels."""
+        _exception = False
         try:
-            classify_messages = [{"role": "system", "content": _CLASSIFY_SYSTEM}]
-            if last_assistant:
-                classify_messages.append({"role": "assistant", "content": last_assistant})
+            # Multi-turn bootstrap: the classifier prompt lives as a prior user
+            # turn that the model "acknowledges" with a hardcoded assistant
+            # response. This mirrors the Ollama-shell pattern that empirically
+            # classifies correctly across a much wider set of queries than
+            # either system-role placement or single-turn user concatenation.
+            # See feedback_instruction_placement.
+            classify_messages = [
+                {"role": "user",      "content": _CLASSIFY_SYSTEM},
+                # Empty assistant ack outperformed a hardcoded sentence on 2026-06-05
+                # smokes: same 1-API-call cost, +1 correct (resolved "list of all the
+                # AML rules in the system" → threshold instead of policy). The empty
+                # turn supplies structural scaffolding (a multi-turn shape the model
+                # was trained against) without injecting topic-content that nudged
+                # the model into conversational mode.
+                {"role": "assistant", "content": ""},
+            ]
+            # NOTE: last_assistant is INTENTIONALLY NOT appended here. The classifier
+            # must be stateless — it classifies only the current query against the
+            # examples in _CLASSIFY_SYSTEM. Injecting a previous chat response (e.g.
+            # a multi-paragraph cluster summary) shifts the model's output
+            # distribution at temperature=0 and was producing empty classifier
+            # output on long-context turns. Elliptical follow-ups are already
+            # handled at the run() level via sticky routing on self._last_agent.
             classify_messages.append({"role": "user", "content": query})
+            _t_start = time.perf_counter()
+            _prompt_chars = sum(len(m.get("content") or "") for m in classify_messages)
+            # ── INPUT DIAGNOSTICS ─────────────────────────────────────────
+            # Print per-message char counts and a snippet of last_assistant
+            # to track context-size sensitivity in classifier output.
+            print(f"[debug.classify.input] query={repr(query[:200])}", flush=True)
+            for _i, _m in enumerate(classify_messages):
+                _content = _m.get("content") or ""
+                _role = _m.get("role")
+                if _i == 0:
+                    print(f"[debug.classify.input] msg[{_i}] role={_role} len={len(_content)} (system prompt)", flush=True)
+                elif _role == "assistant" and len(_content) > 100:
+                    # last_assistant — show head + tail to spot patterns triggering drift
+                    print(f"[debug.classify.input] msg[{_i}] role={_role} len={len(_content)}", flush=True)
+                    print(f"[debug.classify.input]   head_500={repr(_content[:500])}", flush=True)
+                    print(f"[debug.classify.input]   tail_500={repr(_content[-500:])}", flush=True)
+                else:
+                    print(f"[debug.classify.input] msg[{_i}] role={_role} len={len(_content)} content={repr(_content[:200])}", flush=True)
             resp = self._client.chat.completions.create(
                 model=OLLAMA_MODEL,
-                max_tokens=20,
+                max_tokens=800,
                 temperature=0,
                 messages=classify_messages,
+                extra_body={"think": False, "chat_template_kwargs": {"enable_thinking": False}},
             )
-            raw = resp.choices[0].message.content or ""
+            _t_total = time.perf_counter() - _t_start
+            print(
+                f"[timing] orchestrator.classify: total={_t_total:.2f}s | "
+                f"prompt_msgs={len(classify_messages)}/{_prompt_chars}ch tools=0",
+                flush=True,
+            )
+            # ── OUTPUT DIAGNOSTICS ────────────────────────────────────────
+            # Capture raw BEFORE think-tag stripping + finish_reason + token
+            # usage so we can tell whether the model produced only thinking
+            # content, hit max_tokens mid-thought, or actually returned empty.
+            _choice = resp.choices[0]
+            _msg = _choice.message
+            _raw_full = (_msg.content or "")
+            _finish = getattr(_choice, "finish_reason", "?")
+            _usage = getattr(resp, "usage", None)
+            _prompt_tokens     = getattr(_usage, "prompt_tokens",     None) if _usage else None
+            _completion_tokens = getattr(_usage, "completion_tokens", None) if _usage else None
+            _total_tokens      = getattr(_usage, "total_tokens",      None) if _usage else None
+            print(
+                f"[debug.classify.output] finish_reason={_finish} "
+                f"prompt_toks={_prompt_tokens} completion_toks={_completion_tokens} "
+                f"total_toks={_total_tokens}",
+                flush=True,
+            )
+            print(f"[debug.classify.output] raw_pre_strip_len={len(_raw_full)}", flush=True)
+            if _raw_full:
+                # Show full pre-strip text — usually short for classifier, this is
+                # the smoking gun if the model emitted only <think> content.
+                print(f"[debug.classify.output] raw_pre_strip={repr(_raw_full[:2000])}", flush=True)
+                if "<think>" in _raw_full:
+                    print(f"[debug.classify.output] WARNING: response contains <think> tag — model is thinking despite enable_thinking=False", flush=True)
+                if "<think>" in _raw_full and "</think>" not in _raw_full:
+                    print(f"[debug.classify.output] WARNING: unclosed <think> — model likely hit max_tokens mid-thought", flush=True)
+            raw = _raw_full
+            raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+            print(f"[orchestrator] classifier raw: {repr(raw)}", flush=True)
             valid = {"threshold", "segmentation", "ofac", "policy", "greeting", "out_of_scope"}
             labels = [l.strip().lower() for l in raw.split(",") if l.strip().lower() in valid]
+            print(f"[orchestrator] classifier labels: {labels}", flush=True)
         except Exception as e:
             print(f"[orchestrator] classification error: {e} — defaulting to policy", flush=True)
             labels = ["policy"]
+            _exception = True
 
-        # Keyword override — correct obvious misrouting regardless of LLM output
-        import difflib as _dl
         q_lower = query.lower()
-        _words = q_lower.split()
 
-        # Conceptual/definitional questions about AML concepts → always policy
-        # Must run before is_threshold keyword check so "threshold tuning" / "segmentation"
-        # questions aren't hijacked by the operational keyword override.
-        _conceptual_verbs = r'\b(what is|what are|explain|how does|how do|describe|define|tell me about|overview of|walk me through)\b'
-        _conceptual_topics = [
-            "threshold tuning",
-            "dynamic segmentation", "behavioral segmentation", "customer segmentation",
-            "segmentation approach", "segmentation work", "segmentation method",
-            "k-means", "kmeans clustering",
-            "sar backtesting", "sar backtest", "backtesting",
-            "sanctions", "sanctions list",
-            "aria help", "aria assist",   # "how does ARIA help with X"
-        ]
-        if (re.search(_conceptual_verbs, q_lower)
-                and any(kw in q_lower for kw in _conceptual_topics)):
-            print("[orchestrator] conceptual pre-check → conceptual", flush=True)
-            return ["conceptual"]
-
-        def _fuzzy(word_list, terms, cutoff=0.82):
-            """True if any query word is a close match to any term (handles typos)."""
-            for w in word_list:
-                if len(w) < 4:
-                    continue
-                if _dl.get_close_matches(w, terms, n=1, cutoff=cutoff):
-                    return True
-            return False
-
-        # Dataset summary / count queries → always threshold (segment_stats tool)
-        _is_dataset_summary = any(p in q_lower for p in [
-            "how many customers", "how many alerts", "how many accounts",
-            "total customers", "total alerts", "total accounts",
-            "customers and alerts", "alerts and customers",
-            "in the dataset", "summary of the data", "data summary",
-            "give me a summary", "overview of the data", "dataset overview",
-            "how much data", "size of the dataset",
+        # Rescue: only fires when the LLM call threw an exception and defaulted to policy.
+        # Does NOT override a legitimate policy classification from the model.
+        _is_threshold_kw = any(w in q_lower for w in [
+            "sweep", "fp", "fn", "sar", "heatmap", "backtest", "tuning", "threshold",
+            "2d grid", "2d analysis", "grid analysis",
+            "avg_trxns_week", "avg_trxn_amt", "trxn_amt_monthly",
+            # list_rules-style queries — classifier prompt routes these to threshold
+            # but a misclassification (policy/out_of_scope) used to slip through
+            # without rescue, hitting the OOS handler instead.
+            "rule", "rules", "aml rule", "list rules", "list_rules",
+            "precision", "fp rate", "sar rate",
         ])
-        if _is_dataset_summary:
+        _is_segmentation_kw = any(w in q_lower for w in ["cluster", "k-means", "kmeans", "treemap"])
+        if _exception and labels == ["policy"] and _is_threshold_kw and not _is_segmentation_kw:
             labels = ["threshold"]
-            print("[orchestrator] keyword override → threshold (dataset summary / count query)")
+            print("[orchestrator] exception rescue → threshold", flush=True)
 
-        is_segmentation = (
-            any(w in q_lower for w in ["cluster", "k-means", "kmeans", "treemap"])
-            or _fuzzy(_words, ["cluster", "clustering", "segmentation", "kmeans"])
-        )
-        is_threshold = (
-            any(w in q_lower for w in ["sweep", "fp", "fn", "sar", "heatmap", "backtest", "tuning", "threshold", "2d grid", "2d analysis", "grid analysis", "true positive", "true negative"])
-            or _fuzzy(_words, ["threshold", "tuning", "backtest", "heatmap", "sweep"])
-        )
-        is_rule_query = (
-            any(w in q_lower for w in ["rule", "rules", "false positive", "false negative", "precision", "layering", "structuring", "structr"])
-            or _fuzzy(_words, ["precision"])
-        )
-        # "cluster N" in a sweep/backtest query = filter, not segmentation request
-        cluster_as_filter = is_threshold and is_segmentation
-        # "rule performance for Cluster X" / "which rules in Cluster 4" → cluster_rule_summary
-        rule_cluster = is_rule_query and is_segmentation
-        if rule_cluster:
-            labels = ["threshold"]
-            print("[orchestrator] keyword override → threshold (rule+cluster → cluster_rule_summary)")
-        elif is_segmentation and not is_threshold:
-            labels = ["segmentation"]
-            print("[orchestrator] keyword override → segmentation")
-        elif cluster_as_filter:
-            labels = ["threshold"]
-            print("[orchestrator] keyword override → threshold (cluster is a filter, not segmentation)")
-        elif is_rule_query and "policy" in labels and "threshold" in labels:
-            labels = ["threshold"]
-            print("[orchestrator] keyword override → threshold (rule query, dropped policy)")
-        # Rescue FP/FN/TP/TN/2D definitional questions classified as "policy" → threshold
-        _fn_fp_kw = ["false positive", "false negative", "true positive", "true negative", "2d grid", "2d sweep"]
-        if labels == ["policy"] and not is_segmentation and not is_threshold and any(kw in q_lower for kw in _fn_fp_kw):
-            labels = ["threshold"]
-            print("[orchestrator] keyword override → threshold (FP/FN/2D definition rescued from policy)")
-
-        # Greetings and social acknowledgments
-        _greeting_tokens = {"hello", "hi", "hey", "howdy", "greetings", "ahoy"}
-        _social_phrases  = ["thanks", "thank you", "that was helpful", "that's helpful",
-                            "got it", "great, thanks", "sounds good", "perfect, thanks",
-                            "appreciate it", "cheers", "ahoy matey"]
-        _identity_phrases = ["what is your name", "what's your name", "who are you",
-                             "are you aria", "your name is", "tell me your name"]
-        # Only match standalone capability questions — patterns that cannot be
-        # a prefix of "how does ARIA help *with X*" or similar topic queries.
-        _capability_phrases = [
-            "what can aria do",
-            "what does aria do",
-            "what is aria",
-            "aria's capabilities",
-            "what are your capabilities",
-            "what does aria offer",
-            "aria features",
-            "aria functionality",
-        ]
-        _is_capability = any(p in q_lower for p in _capability_phrases)
-        _is_social = (q_lower.strip() in _greeting_tokens
-                      or any(q_lower.strip().startswith(p) or q_lower.strip() == p
-                             for p in _social_phrases))
-        _is_identity = any(p in q_lower for p in _identity_phrases)
-        if _is_capability:
-            labels = ["capability"]
-            print("[orchestrator] keyword override → capability (ARIA capability question)")
-        elif _is_identity:
-            labels = ["greeting"]
-            print("[orchestrator] keyword override → greeting (identity question)")
-        # Prevent data questions from being misclassified as greeting → policy instead
-        is_data_question = any(w in q_lower for w in [
-            "show me", "can you show", "credit", "score", "income", "balance",
-            "distribution", "customers", "average", "what is the",
-        ])
-        if "greeting" in labels and is_data_question:
-            labels = ["policy"]
-            print("[orchestrator] keyword override → policy (data question misclassified as greeting)")
-
-        # Social sentences where an AML term appears as a proper noun → out_of_scope
-        # e.g. "My dog OFAC met a cat", "OFAC said hello", "My SAR is acting strange"
-        _social_aml_noun = re.search(
-            r'\b(my|our|his|her|their|the)\s+(dog|cat|friend|colleague|boss|wife|husband|kid|son|daughter|team|neighbor)\b',
-            q_lower
-        )
-        if _social_aml_noun:
-            labels = ["out_of_scope"]
-            print("[orchestrator] keyword override → out_of_scope (social sentence containing AML term)")
-
-        # OFAC guard: only route to ofac agent when there is explicit screening-action context
-        if "ofac" in labels:
-            _ofac_action = any(p in q_lower for p in [
-                "screen", "sdn", "scan", "ofac hit", "ofac exposure", "check ofac",
-                "run ofac", "ofac check", "ofac list", "sanctions", "sanctioned",
-                "sanction list", "iran", "north korea", "dprk",
-            ])
-            if not _ofac_action:
-                labels = ["policy"]
-                print("[orchestrator] OFAC reclassified → policy (no screening action context)")
-
-        # Threshold column names as bare replies (clarification follow-ups)
-        _THRESHOLD_COLS = {"avg_trxns_week", "avg_trxn_amt", "trxn_amt_monthly"}
-        if q_lower.strip() in _THRESHOLD_COLS:
-            labels = ["threshold"]
-            print("[orchestrator] keyword override → threshold (bare column name reply)")
-
-        # Keyword fallback when fine-tuned model ignores classification prompt
-        if not labels:
-            q = query.lower()
-            if any(w in q for w in ["threshold", "sweep", "fp", "fn", "sar", "heatmap", "rule", "alert", "tuning", "backtest",
-                                      "avg_trxns_week", "avg_trxn_amt", "trxn_amt_monthly",
-                                      "false positive", "false negative", "true positive", "true negative",
-                                      "2d grid", "2d sweep", "2d analysis", "grid analysis"]):
+        # OOS rescue: classifier sometimes returns out_of_scope for data queries
+        # that contain unmistakable threshold/segmentation keywords (list-rules
+        # style "show me the AML rules" was bleeding through after the
+        # production_switchover minimal-prompt rollout).
+        if labels == ["out_of_scope"]:
+            if _is_threshold_kw and not _is_segmentation_kw:
                 labels = ["threshold"]
-            elif any(w in q for w in ["cluster", "segment", "k-means", "kmeans", "treemap"]):
+                print("[orchestrator] oos rescue → threshold", flush=True)
+            elif _is_segmentation_kw and not _is_threshold_kw:
                 labels = ["segmentation"]
-            elif any(re.fullmatch(w, tok) for w in ["hello", "hi", "hey", "howdy", "greetings"] for tok in q.split()):
-                labels = ["greeting"]
-            else:
-                labels = ["policy"]
-            print(f"[orchestrator] keyword fallback labels: {labels}", flush=True)
+                print("[orchestrator] oos rescue → segmentation", flush=True)
 
-        # Final guard: data questions must never route to greeting
-        if "greeting" in labels and is_data_question:
-            labels = ["policy"]
-            print("[orchestrator] post-fallback override → policy (data question)")
+        # Segmentation rescue: empty-ack classifier (commit 5247fcc) is more
+        # decisive and sometimes commits to single-label `segmentation` on
+        # cluster-filtered threshold-tool queries — e.g. "run adaptive
+        # thresholds on Individual customers" or "Show Elder Abuse SAR
+        # backtest for Cluster 4". With single-label segmentation the Phase 5
+        # multi-label suppression can't fire (it requires both labels), so the
+        # segmentation agent runs alone and lacks the threshold tool. Same
+        # keyword set as Phase 5 — promote to threshold when the cluster word
+        # is a parameter, not the primary intent.
+        if labels == ["segmentation"]:
+            _q_lower_seg = query.lower()
+            _is_threshold_tool_query = any(kw in _q_lower_seg for kw in [
+                "backtest", "adaptive threshold", "threshold tuning",
+                "sweep", "2d", "heatmap", "grid",
+                "sar catch", "fp rate", "fn rate", "precision",
+                # rule names that imply a threshold tool
+                "activity deviation", "elder abuse", "velocity single", "velocity multiple",
+                "funnel account", "structuring", "ctr client", "burst in",
+                "risky international", "round-trip", "human trafficking", "detect excessive",
+            ])
+            if _is_threshold_tool_query:
+                labels = ["threshold"]
+                print("[orchestrator] segmentation rescue -> threshold (analytical tool query)", flush=True)
+
+        # Empty classification → out_of_scope. Threshold/segmentation keyword rescue
+        # still fires first because we'd rather route ambiguous data-y queries to the
+        # right agent than refuse them. But if no signal at all, refuse explicitly
+        # rather than risk a hallucinated policy answer.
+        if not labels:
+            if _is_threshold_kw:
+                labels = ["threshold"]
+            elif _is_segmentation_kw:
+                labels = ["segmentation"]
+            else:
+                labels = ["out_of_scope"]
+            print(f"[orchestrator] keyword fallback labels: {labels}", flush=True)
 
         print(f"[orchestrator] routing to: {labels}", flush=True)
         return labels
 
-    def run(self, query: str, tool_executor, last_assistant: str = "", history: list = None, last_cluster_result: str = "", last_rule_list: str = "") -> tuple:
+    def run(self, query: str, tool_executor, last_assistant: str = "", history: list = None, last_cluster_result: str = "", last_rule_list: str = "", last_threshold_params: dict = None) -> tuple:
         """
         Route query via LLM, run required agents (in parallel if >1), merge results.
         Returns: (combined_text, all_chart_results)
         """
         labels = self._route(query, last_assistant)
 
+        # Multi-label suppression: classifier multi-labels [threshold, segmentation] on
+        # queries like "adaptive thresholds on business customers" or "Elder Abuse
+        # backtest for Cluster 4" because of cluster/segment words. But the operation
+        # is a threshold-tool operation filtered by cluster — only the threshold agent
+        # has the actual tool. Segmentation agent has no tool for this and fabricates
+        # plausible-looking threshold numbers (Tests 11 and 13 in 2026-06-05 app run).
+        # See cluster_segment_plan.md Phase 5.
+        if "threshold" in labels and "segmentation" in labels:
+            _q_lower_ml = query.lower()
+            _is_threshold_tool_query = any(kw in _q_lower_ml for kw in [
+                "backtest", "adaptive threshold", "threshold tuning",
+                "sweep", "2d", "heatmap", "grid",
+                "sar catch", "fp rate", "fn rate", "precision",
+                # rule names that imply a threshold tool
+                "activity deviation", "elder abuse", "velocity single", "velocity multiple",
+                "funnel account", "structuring", "ctr client", "burst in",
+                "risky international", "round-trip", "human trafficking", "detect excessive",
+            ])
+            if _is_threshold_tool_query:
+                labels = ["threshold"]
+                print("[orchestrator] multi-label suppression -> threshold (analytical tool query)", flush=True)
+
         # Sticky routing: elliptical follow-ups routed to policy/weak labels → re-use prior agent.
         # Covers "and the youngest", "which one has lowest", "top 3 by precision", "what about days_required?"
         _STICKY_SOURCES = {"threshold", "segmentation"}
-        _WEAK_LABELS = {"policy", "out_of_scope", "greeting", "capability"}
+        _WEAK_LABELS = {"policy", "out_of_scope", "greeting"}
         if (self._last_agent in _STICKY_SOURCES
                 and set(labels) <= _WEAK_LABELS
                 and _is_elliptical(query)):
             print(f"[orchestrator] sticky routing -> {self._last_agent} (elliptical follow-up)", flush=True)
             labels = [self._last_agent]
+
+        # Extended sticky: cluster attribute follow-ups misrouted to threshold.
+        # Queries like "which one has the highest monthly trxn amount" contain terms
+        # ("monthly", "trxn", "amount") that look threshold-y to the LLM, but they
+        # are cluster attribute lookups when a segmentation session is active.
+        # Guard: no specific rule name or threshold tool keyword present.
+        _q_lower = query.lower()
+        _has_rule_or_tool = any(kw in _q_lower for kw in [
+            "activity deviation", "elder abuse", "velocity single", "velocity multiple",
+            "funnel account", "structuring", "ctr client", "burst in", "risky international",
+            "round-trip", "human trafficking", "detect excessive",
+            "backtest", "2d sweep", "2d grid", "floor_amount", "z_threshold",
+            "pair_total", "days_required", "daily_floor", "threshold tuning",
+            "list rules", "rule sweep", "sar backtest",
+        ])
+        if (self._last_agent == "segmentation"
+                and last_cluster_result
+                and _is_elliptical(query)
+                and labels == ["threshold"]
+                and not _has_rule_or_tool):
+            labels = ["segmentation"]
+            print("[orchestrator] sticky routing → segmentation (cluster attribute rescued from threshold)", flush=True)
 
         # Build prior session context once — passed to every agent (including policy)
         # so elliptical follow-ups ("and the youngest", "what about days_required?")
@@ -461,14 +524,8 @@ class OrchestratorAgent:
         if "greeting" in labels:
             return self._GREETING, []
 
-        if "capability" in labels:
-            return self._CAPABILITY, []
-
         if "out_of_scope" in labels:
             return self._OUT_OF_SCOPE, []
-
-        if "conceptual" in labels:
-            return self.policy_agent.run(query, tool_executor, _prior_context, history)
 
         # OFAC screening is handled directly via tool_executor (no specialist agent)
         if "ofac" in labels:
@@ -513,22 +570,47 @@ class OrchestratorAgent:
             context = ""
             if last_rule_list and name == "threshold":
                 _rule_ctx = last_rule_list[:4000] if len(last_rule_list) > 4000 else last_rule_list
-                context = _rule_ctx
-                print(f"[orchestrator] injecting previous rule list for follow-up ({len(_rule_ctx)} chars)")
+                _is_rule_followup = (
+                    _is_elliptical(query)
+                    or any(kw in query.lower() for kw in {"the same", "same by", "sort by", "rank by"})
+                )
+                if last_assistant and _is_rule_followup:
+                    _prev_header = last_assistant.split('\n')[0].strip()[:200]
+                    context = f"[PRIOR RESPONSE]\n{_prev_header}\n[END PRIOR RESPONSE]\n\n{_rule_ctx}"
+                else:
+                    context = _rule_ctx
+                print(f"[orchestrator] injecting rule list for threshold query ({len(_rule_ctx)} chars)")
             if name == "segmentation":
-                _cluster_ctx = last_cluster_result or last_assistant
-                # If the stored stats are short (alert counts only, no cluster attributes),
-                # combine with the assistant's previous response which may have more detail.
-                if _cluster_ctx and last_assistant and len(_cluster_ctx) < 500 and len(last_assistant) > len(_cluster_ctx):
-                    _cluster_ctx = _cluster_ctx + "\n\n" + last_assistant
+                # Only use actual cluster stats — never fall back to last_assistant because
+                # non-clustering responses (e.g. Elder Abuse text) can contain "Cluster N"
+                # and would be falsely injected as [PREVIOUS CLUSTERING RESULT].
+                _cluster_ctx = last_cluster_result
                 if _cluster_ctx and "Cluster" in _cluster_ctx:
                     # Trim to ~2500 chars to avoid context overflow in long conversations
                     if len(_cluster_ctx) > 2500:
                         lines = [l for l in _cluster_ctx.splitlines() if l.strip().startswith("Cluster")]
                         _cluster_ctx = "\n".join(lines[:20]) if lines else _cluster_ctx[:1500]
                     context = f"[PREVIOUS CLUSTERING RESULT]\n{_cluster_ctx}\n[END PREVIOUS RESULT]"
-                    print(f"[orchestrator] injecting previous cluster context ({len(_cluster_ctx)} chars)")
-            return agent.run(query, tool_executor, context, history)
+                    print(f"[orchestrator] injecting previous cluster context ({len(_cluster_ctx)} chars)", flush=True)
+            # Threshold agent: strip raw history — rule list is already injected via
+            # context above, and prior backtest/AT prose in history causes the model
+            # to answer from memory instead of calling the tool (J-series failures).
+            if name == "threshold" and last_threshold_params:
+                seg = last_threshold_params.get("segment", "")
+                col = last_threshold_params.get("threshold_column", "")
+                if seg and col:
+                    _tp_hint = f"[SESSION CONTEXT — last threshold call used segment={seg}, column={col}. Use only if the user has not specified a different segment or column.]"
+                    context = f"{_tp_hint}\n\n{context}".strip() if context else _tp_hint
+                    print(f"[orchestrator] injecting last threshold params: {seg}/{col}")
+            # Segmentation: when the user is filtering clusters for the chart, append
+            # the DISPLAY_CLUSTERS protocol directive to the query (moved from system
+            # prompt Rule 10 per feedback_instruction_placement).
+            _seg_query = query
+            if name == "segmentation" and _CLUSTER_FILTER_PATTERNS.search(query):
+                _seg_query = query + DISPLAY_CLUSTERS_DIRECTIVE
+                print("[orchestrator] appended DISPLAY_CLUSTERS directive to segmentation query")
+            _th_history = [] if name == "threshold" else history
+            return agent.run(_seg_query, tool_executor, context, _th_history)
 
         results = {}
         with ThreadPoolExecutor(max_workers=len(to_run)) as executor:

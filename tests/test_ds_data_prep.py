@@ -200,3 +200,30 @@ class TestComputeTxnAggregates:
         ])
         agg = compute_txn_aggregates(txn)
         assert agg.loc[0, "total_trxn_amt"] == pytest.approx(300.0)
+
+
+# ── Derived dim columns (XL 22-product taxonomy: BUSINESS_SIZE / REVENUE_BAND /
+#    OCCUPATION_GROUP / CRYPTO_USER) ────────────────────────────────────────────
+
+class TestDerivedDimColumns:
+    """Verifies that the new segmentation dim columns are imported and produce
+    valid buckets. These dims surface in discover_dims so the treemap/2D sweep
+    pickers can slice on them."""
+
+    def test_revenue_band_importable(self):
+        from synth_products import revenue_band
+        assert revenue_band(3_000_000) == "<$5M"
+
+    def test_occupation_group_importable(self):
+        from synth_products import occupation_group
+        assert occupation_group("Nurse") == "Healthcare"
+
+    def test_lambda_ds_perf_excludes_raw_lowercase_dims(self):
+        # The capitalized derived dims (BUSINESS_SIZE etc.) take precedence
+        # over the raw lowercase columns. ds_data_prep drops the lowercase
+        # ones so discover_dims doesn't have to special-case them.
+        from lambda_ds_performance import _DIM_EXCLUDE
+        # The capitalized derived versions are NOT excluded (so they surface)
+        for derived in ("BUSINESS_SIZE", "REVENUE_BAND", "OCCUPATION_GROUP",
+                        "CRYPTO_USER"):
+            assert derived.lower() not in _DIM_EXCLUDE

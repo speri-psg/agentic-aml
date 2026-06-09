@@ -17,6 +17,7 @@ class TestToolsDefinition:
     EXPECTED_TOOLS = {
         "cluster_analysis", "alerts_distribution",
         "prepare_segmentation_data", "ds_cluster_analysis",
+        "cluster_pca_plot",   # added in scale_up_plan Path 2 (bank-scale segmentation)
     }
 
     def _tool_names(self):
@@ -98,39 +99,23 @@ class TestToolsDefinition:
 # ── System prompt validation ───────────────────────────────────────────────────
 
 class TestSystemPrompt:
-    def test_default_customer_type_is_all(self):
-        assert "default to All" in SYSTEM_PROMPT or "default is All" in SYSTEM_PROMPT \
-               or ("not specify" in SYSTEM_PROMPT and "All" in SYSTEM_PROMPT)
+    """The production_switchover (2026-06-02) replaced multi-thousand-char rule-
+    based prompts with a one-line directive. Behavioral instruction now lives in
+    training examples + tool definitions. See feedback_instruction_placement."""
 
-    def test_n_clusters_default_mentioned(self):
-        assert "4" in SYSTEM_PROMPT
+    def test_prompt_is_minimal(self):
+        # The whole prompt should be short (under 200 chars). Previously it was 16K+.
+        assert len(SYSTEM_PROMPT) < 200
 
-    def test_display_clusters_directive_described(self):
-        assert "DISPLAY_CLUSTERS" in SYSTEM_PROMPT
+    def test_prompt_directs_to_data(self):
+        # Minimal prompt instructs the model to ground answers in tool output.
+        assert "data" in SYSTEM_PROMPT.lower()
 
-    def test_display_clusters_format_is_correct(self):
-        assert "DISPLAY_CLUSTERS: N" in SYSTEM_PROMPT
-
-    def test_system_prompt_has_english_only_rule(self):
-        assert "English" in SYSTEM_PROMPT
-
-    def test_do_not_invent_numbers_rule_present(self):
-        assert "invent" in SYSTEM_PROMPT or "not in the tool result" in SYSTEM_PROMPT \
-               or "only" in SYSTEM_PROMPT.lower()
-
-    def test_ds_cluster_analysis_tool_name_in_prompt(self):
-        # System prompt must spell out the exact tool name to prevent hallucination
-        assert "ds_cluster_analysis" in SYSTEM_PROMPT
-
-    def test_n_clusters_user_override_rule(self):
-        # Rule 8 must instruct the model to pass the user's requested count exactly
-        assert "n_clusters" in SYSTEM_PROMPT
-
-    def test_display_clusters_only_when_user_asks_to_filter(self):
-        # Directive must only fire when user asks to filter — rule should say so
-        assert "does NOT ask to filter" in SYSTEM_PROMPT \
-               or "do NOT include" in SYSTEM_PROMPT \
-               or "not ask" in SYSTEM_PROMPT.lower()
+    def test_prompt_does_not_contain_obsolete_rule_format(self):
+        # Old prompts had "Rule 1:", "Rule 16:", etc. and were rule-list-driven.
+        for obsolete in ("Rule 1:", "Rule 16:", "DISPLAY_CLUSTERS",
+                         "OVERRIDE RULE"):
+            assert obsolete not in SYSTEM_PROMPT
 
 
 # ── SegmentationAgent instantiation ───────────────────────────────────────────

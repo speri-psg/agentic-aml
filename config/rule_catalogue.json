@@ -387,5 +387,130 @@
     },
     "default_sweep": "floor_amount",
     "default_2d": ["floor_amount", "days_required"]
+  },
+  "chain-hop rapid (crypto)": {
+    "name": "Chain-Hop Rapid (Crypto)",
+    "current": "4+ ACH transfers to DIFFERENT crypto exchange tiers (regulated, DeFi gateway, high-risk) within 72 hours, customer-level sum >= $20K",
+    "sweep_params": {
+      "floor_amount": {
+        "col": "trigger_amt",
+        "label": "min total transferred ($)",
+        "current": 20000,
+        "direction": "gte",
+        "sweep_min": 5000,
+        "desc": "Minimum sum of crypto-exchange ACH transfers in window (currently $20K)"
+      },
+      "min_hops": {
+        "col": "n_hops",
+        "label": "minimum distinct exchange hops",
+        "current": 4,
+        "direction": "gte",
+        "sweep_min": 2,
+        "integer_axis": true,
+        "desc": "Minimum number of distinct crypto exchange counterparties hit (currently 4)"
+      }
+    },
+    "default_sweep": "floor_amount",
+    "default_2d": ["floor_amount", "min_hops"]
+  },
+  "mule activation": {
+    "name": "Mule Activation",
+    "current": "Single large inflow ($8K+) followed within 48 hours by 5+ small P2P (Zelle/Venmo/Cash App) outflows draining the inflow",
+    "sweep_params": {
+      "floor_amount": {
+        "col": "trigger_amt",
+        "label": "minimum inflow ($)",
+        "current": 8000,
+        "direction": "gte",
+        "sweep_min": 2000,
+        "desc": "Minimum single inflow triggering the activation check (currently $8K)"
+      },
+      "min_dispersal": {
+        "col": "dispersal_count",
+        "label": "minimum P2P dispersal count",
+        "current": 5,
+        "direction": "gte",
+        "sweep_min": 2,
+        "integer_axis": true,
+        "desc": "Minimum number of P2P outflows in the 48-hour window (currently 5)"
+      }
+    },
+    "default_sweep": "floor_amount",
+    "default_2d": ["floor_amount", "min_dispersal"]
+  },
+  "hyper-fragmentation (p2p)": {
+    "name": "Hyper-Fragmentation (P2P)",
+    "current": "200+ micro-P2P outflows ($5-$50 each) over 14-28 days to many distinct counterparties (Zelle, Venmo, Cash App)",
+    "sweep_params": {
+      "floor_amount": {
+        "col": "trigger_amt",
+        "label": "min total fragmented ($)",
+        "current": 5000,
+        "direction": "gte",
+        "sweep_min": 1000,
+        "desc": "Minimum cumulative P2P spend in the window (currently $5K)"
+      },
+      "min_txn_count": {
+        "col": "txn_count",
+        "label": "minimum micro-txn count",
+        "current": 200,
+        "direction": "gte",
+        "sweep_min": 50,
+        "integer_axis": true,
+        "desc": "Minimum number of micro-P2P transactions in the window (currently 200)"
+      }
+    },
+    "default_sweep": "min_txn_count",
+    "default_2d": ["floor_amount", "min_txn_count"]
+  },
+  "algorithmic recruited cohort": {
+    "name": "Algorithmic Recruited Cohort",
+    "current": "Synchronized biweekly ACH inflows from the SAME employer to 8+ student/gig-worker customers (age 18-30, income < $50K)",
+    "sweep_params": {
+      "floor_amount": {
+        "col": "trigger_amt",
+        "label": "min cumulative inflow per member ($)",
+        "current": 10000,
+        "direction": "gte",
+        "sweep_min": 2000,
+        "desc": "Minimum cumulative inflow per cohort member (currently $10K)"
+      },
+      "min_cohort_size": {
+        "col": "cohort_size",
+        "label": "minimum cohort size",
+        "current": 8,
+        "direction": "gte",
+        "sweep_min": 3,
+        "integer_axis": true,
+        "desc": "Minimum number of customers in a synchronized cohort (currently 8)"
+      }
+    },
+    "default_sweep": "min_cohort_size",
+    "default_2d": ["floor_amount", "min_cohort_size"]
+  },
+  "autonomous dispersal": {
+    "name": "Autonomous Dispersal",
+    "current": "30+ Wire outflows to distinct counterparties at different banks within a 60-minute window (agentic-AI proxy)",
+    "sweep_params": {
+      "floor_amount": {
+        "col": "trigger_amt",
+        "label": "minimum total dispersed ($)",
+        "current": 80000,
+        "direction": "gte",
+        "sweep_min": 20000,
+        "desc": "Minimum cumulative outflow in the 60-min window (currently $80K)"
+      },
+      "min_leg_count": {
+        "col": "txn_count",
+        "label": "minimum outflow legs",
+        "current": 30,
+        "direction": "gte",
+        "sweep_min": 10,
+        "integer_axis": true,
+        "desc": "Minimum number of distinct counterparty outflows in window (currently 30)"
+      }
+    },
+    "default_sweep": "min_leg_count",
+    "default_2d": ["floor_amount", "min_leg_count"]
   }
 }

@@ -3,11 +3,11 @@ config.py — Central configuration for ARIA.
 
 Override LLM endpoint via environment variables:
     set OLLAMA_BASE_URL=http://localhost:11434/v1   (default — Ollama)
-    set OLLAMA_MODEL=qwen2.5:7b                     (default)
+    set OLLAMA_MODEL=aria-v22                       (fine-tuned Gemma 4 — recommended)
 
-To use a fine-tuned model via vLLM after training:
-    set OLLAMA_BASE_URL=http://localhost:8000/v1
-    set OLLAMA_MODEL=qwen-framl
+To point at a remote Ollama (vast.ai or HF Space) via Cloudflare tunnel:
+    set OLLAMA_BASE_URL=https://<tunnel-url>/v1
+    set OLLAMA_MODEL=aria-v2
 
 Data directory:
     set ARIA_DATA_DIR=./aria_synth          (default — synthetic data)
@@ -26,12 +26,16 @@ import glob as _glob
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL",
                             os.getenv("VLLM_BASE_URL", "http://localhost:11434/v1"))
 OLLAMA_MODEL    = os.getenv("OLLAMA_MODEL",
-                            os.getenv("VLLM_MODEL", "qwen2.5:7b"))
+                            os.getenv("VLLM_MODEL", "aria-v22"))
 
 # ── LLM generation parameters ────────────────────────────────────────────────
-MAX_TOKENS_TOOL   = int(os.getenv("MAX_TOKENS_TOOL",   "2048"))  # threshold / segmentation agents
-MAX_TOKENS_POLICY = int(os.getenv("MAX_TOKENS_POLICY", "2048"))  # policy agent (longer KB responses)
+MAX_TOKENS_TOOL   = int(os.getenv("MAX_TOKENS_TOOL",   "2048"))  # threshold / segmentation agents — 1024/1500 silently truncates long outputs (top5+bottom5, full overviews)
+MAX_TOKENS_POLICY = int(os.getenv("MAX_TOKENS_POLICY", "4096"))  # policy agent (longer KB responses)
 MAX_TOOL_CALLS    = int(os.getenv("MAX_TOOL_CALLS",    "6"))      # max agentic loop iterations
+# Set BACKEND_THINK=true for local Ollama (think=True exhausts 1500-token budget before content).
+# Leave unset (false) for vLLM — enable_thinking=false at server level makes the bump unnecessary
+# and 1500→4096 would overflow vLLM's 8192 max-model-len with typical 6k-token inputs.
+BACKEND_THINK     = os.getenv("BACKEND_THINK", "false").lower() == "true"
 
 # ── Data directory ─────────────────────────────────────────────────────────────
 _HERE        = os.path.dirname(os.path.abspath(__file__))
@@ -57,7 +61,7 @@ DS_CSV = (
 SAR_CSV = _find_file(
     ARIA_DATA_DIR,
     "*sar*.csv",
-    fallback=os.path.join(_HERE, "docs", "sar_simulation.csv"),
+    fallback=os.path.join(_HERE, "aria_synth", "sar_simulation.csv"),
 )
 
 # ALERTS_CSV — main dashboard data (customer/account/alert summary rows)
@@ -68,25 +72,32 @@ ALERTS_CSV = _find_file(
 )
 
 # RULE_SWEEP_CSV — alert-level data for rule SAR sweep / backtest
+# aria_alerts.csv is the canonical source (has aria_is_sar labels); rule_sweep_data.csv
+# is a legacy file whose is_sar column was never populated.
 RULE_SWEEP_CSV = _find_file(
     ARIA_DATA_DIR,
-    "*alert*.csv", "*rule*.csv", "*sweep*.csv",
-    fallback=os.path.join(_HERE, "docs", "rule_sweep_data.csv"),
+    "aria_alerts.csv",                    # modern 16-rule data — prefer over legacy rule_sweep_data
+    "*sweep*.csv", "rule_sweep_data.csv",
+    fallback=os.path.join(_HERE, "aria_synth", "rule_sweep_data.csv"),
 )
 
 # Cluster labels — derived at startup from K-Means if not found
 CLUSTER_LABELS_CSV = _find_file(
     ARIA_DATA_DIR,
     "*cluster*label*.csv", "*cluster*.csv",
-    fallback=os.path.join(_HERE, "docs", "customer_cluster_labels.csv"),
+    fallback=os.path.join(_HERE, "aria_synth", "customer_cluster_labels.csv"),
 )
 
 # ── Non-data paths (not user-switchable) ──────────────────────────────────────
-SS_FILES_DIR = os.path.join(_HERE, "ss_files")
-CHROMA_PATH  = os.path.join(_HERE, "chroma_db")
-DOCS_DIR     = os.path.join(_HERE, "docs")
-OFAC_DB      = os.path.join(_HERE, "data", "ofac_sdn.db")
-CUSTOMERS_CSV = os.path.join(_HERE, "ss_files_anon", "aml_s_customers.csv")
+SS_FILES_DIR      = os.path.join(_HERE, "ss_files")
+CHROMA_PATH       = os.path.join(_HERE, "chroma_db")
+DOCS_DIR          = os.path.join(_HERE, "docs")
+OFAC_DB           = os.path.join(_HERE, "data", "ofac_sdn.db")
+OFAC_REFRESH_DAYS = int(os.getenv("OFAC_REFRESH_DAYS", "7"))
+CUSTOMERS_CSV = os.getenv(
+    "CUSTOMERS_CSV",
+    os.path.join(_HERE, "ss_files_anon", "aml_s_customers.csv"),
+)
 
 # Legacy alias — kept so any code still importing SYNTH_DATA_DIR doesn't break
 SYNTH_DATA_DIR = ARIA_DATA_DIR

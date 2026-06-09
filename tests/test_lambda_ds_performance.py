@@ -180,7 +180,7 @@ class TestDiscoverDims:
         df = pd.DataFrame({
             "LOW_AVAIL": [None] * 80 + ["A"] * 20,  # only 20% available → excluded
             "HIGH_AVAIL": ["X"] * 100,               # 100% available, but only 1 unique → excluded
-            "GOOD_COL":  ["A", "B"] * 50,             # 100% available, 2 unique → included
+            "GOOD_COL":  ["A", "B", "C"] * 33 + ["A"],  # 100% available, 3 unique → included
         })
         dims = discover_dims(df, availability=0.70)
         assert "LOW_AVAIL" not in dims
@@ -281,3 +281,77 @@ class TestPerformClustering:
         # Auto-selection should pick K between 2 and 8
         k_found = df_active["cluster"].nunique()
         assert 2 <= k_found <= 8
+
+
+# ── Customer-level aggregation (fix introduced 2026-06-04 with XL rebuild) ────
+
+def _multi_account_df(n_customers=200, accounts_per_customer=3, seed=0):
+    """One row per (account, customer) — many rows per customer_id.
+
+    Matches the shape of aria_synth_xl/ds_segmentation_synth.csv, where joint
+    holders + multi-account customers cause N customers → 2-4N rows. Risk is
+    assessed per customer, so perform_clustering must dedupe to customer_id
+    before KMeans.
+    """
+    rng = np.random.default_rng(seed)
+    rows = []
+    for i in range(n_customers):
+        cid = f"aria_cust_{i:06d}"
+        segment = i % 2
+        for j in range(rng.integers(1, accounts_per_customer + 1)):
+            rows.append({
+                "customer_id":         cid,
+                "dynamic_segment":     segment,
+                "avg_num_trxns":       float(rng.uniform(1, 50)),
+                "avg_weekly_trxn_amt": float(rng.uniform(100, 10000)),
+                "trxn_amt_monthly":    float(rng.uniform(500, 50000)),
+                "ACCT_AGE_YEARS":      float(rng.uniform(0.1, 15)),
+                "ACCOUNT_TYPE":        rng.choice(["Checking", "Savings", "Loan"]),
+                "AGE":                 float(rng.uniform(20, 80)),
+            })
+    return pd.DataFrame(rows)
+
+
+class TestCustomerLevelClustering:
+    """When customer_id is present, perform_clustering aggregates joint /
+    multi-account rows down to one row per customer before KMeans. So cluster
+    sums match unique-customer counts (banner numbers), not row counts."""
+
+    def test_cluster_count_equals_unique_customers(self):
+        df = _multi_account_df(n_customers=100, seed=1)
+        n_unique = df["customer_id"].nunique()
+        _, _, df_active = perform_clustering(df, n_clusters=3)
+        assert len(df_active) == n_unique
+
+    def test_business_segment_clusters_to_business_customer_count(self):
+        df = _multi_account_df(n_customers=100, seed=2)
+        n_biz_unique = df[df["dynamic_segment"] == 0]["customer_id"].nunique()
+        _, _, df_active = perform_clustering(df, customer_type="Business", n_clusters=3)
+        assert len(df_active) == n_biz_unique
+
+    def test_individual_segment_clusters_to_individual_customer_count(self):
+        df = _multi_account_df(n_customers=100, seed=3)
+        n_ind_unique = df[df["dynamic_segment"] == 1]["customer_id"].nunique()
+        _, _, df_active = perform_clustering(df, customer_type="Individual", n_clusters=3)
+        assert len(df_active) == n_ind_unique
+
+    def test_cluster_sums_match_total(self):
+        df = _multi_account_df(n_customers=80, seed=4)
+        _, _, df_active = perform_clustering(df, n_clusters=4)
+        # Sum of cluster sizes must equal the deduped customer total — not the
+        # joint-row total.
+        assert df_active["cluster"].value_counts().sum() == df["customer_id"].nunique()
+
+    def test_aggregation_does_not_duplicate_customers(self):
+        df = _multi_account_df(n_customers=120, seed=5)
+        _, _, df_active = perform_clustering(df, n_clusters=3)
+        # Every customer appears exactly once post-clustering
+        assert df_active["customer_id"].is_unique
+
+    def test_stats_use_customer_terminology(self):
+        # The stats string was updated to say "Active customers" not
+        # "Active accounts" once the row-level confusion was fixed.
+        df = _multi_account_df(n_customers=60, seed=6)
+        _, stats, _ = perform_clustering(df, n_clusters=3)
+        assert "Active customers" in stats
+        assert "active customers" in stats   # also in per-cluster footers

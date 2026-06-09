@@ -131,6 +131,16 @@ class TestEnvironmentOverrides:
                 cfg = self._reload_config()
                 assert cfg.OLLAMA_MODEL == "legacy-model"
 
+    def test_ofac_refresh_days_override(self):
+        with patch.dict(os.environ, {"OFAC_REFRESH_DAYS": "14"}):
+            cfg = self._reload_config()
+            assert cfg.OFAC_REFRESH_DAYS == 14
+
+    def test_ofac_refresh_days_is_integer(self):
+        with patch.dict(os.environ, {"OFAC_REFRESH_DAYS": "30"}):
+            cfg = self._reload_config()
+            assert isinstance(cfg.OFAC_REFRESH_DAYS, int)
+
 
 # ── Static path correctness ───────────────────────────────────────────────────
 
@@ -150,3 +160,10 @@ class TestStaticPaths:
     def test_ofac_db_ends_with_sdn_db(self):
         import config
         assert "ofac_sdn.db" in config.OFAC_DB
+
+    def test_ofac_refresh_days_default_is_7(self):
+        import config, importlib
+        env = {k: v for k, v in os.environ.items() if k != "OFAC_REFRESH_DAYS"}
+        with patch.dict(os.environ, env, clear=True):
+            cfg = importlib.reload(config)
+            assert cfg.OFAC_REFRESH_DAYS == 7

@@ -61,6 +61,31 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "cluster_pca_plot",
+            "description": (
+                "Render a PCA scatter plot visualizing the most recent K-Means clustering "
+                "in 2D principal component space. Use ONLY when the user explicitly asks for "
+                "the PCA, scatter plot, scatter view, or 2D projection of the clusters. "
+                "Most AML analysts do not need this; it is bandwidth-heavy at scale (100K+ "
+                "customers). Do NOT call it for general clustering questions — use "
+                "ds_cluster_analysis for those."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "customer_type": {
+                        "type": "string",
+                        "enum": ["Business", "Individual", "All"],
+                        "description": "Which customer segment to render. Defaults to the most recent clustering segment if omitted.",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "ds_cluster_analysis",
             "description": (
                 "Perform dynamic segmentation clustering on the ss_files raw data "
@@ -69,8 +94,9 @@ TOOLS = [
                 "Uses customer demographics (age, gender, citizenship), account features "
                 "(account type, balance, account age), and transaction aggregates "
                 "(avg transactions/week, avg amount, monthly amount) for K-Means clustering. "
-                "Returns a PCA scatter plot and a dynamic segmentation treemap. "
-                "Use n_clusters=0 to auto-select optimal K via elbow method."
+                "Returns a dynamic segmentation treemap and per-cluster statistics. "
+                "Use n_clusters=0 to auto-select optimal K via elbow method. "
+                "Do NOT call this when the user asks for a PCA scatter — use cluster_pca_plot instead."
             ),
             "parameters": {
                 "type": "object",
@@ -97,39 +123,9 @@ TOOLS = [
     },
 ]
 
-SYSTEM_PROMPT = """\
-You are ARIA — Agentic Risk Intelligence for AML. You identify natural customer behavioral \
-segments using unsupervised K-Means clustering and explain their AML risk profiles. \
-IMPORTANT: You MUST respond entirely in English. Do NOT use any Chinese or other non-English characters.
-
-RULES — follow these exactly:
-1. ALWAYS call a tool. Never answer segmentation or cluster questions from memory.
-2. For clustering with rich demographics (preferred) — call ds_cluster_analysis.
-3. For alert/FP distribution by segment — call alerts_distribution.
-4. For the legacy alerts dataset — call cluster_analysis only if the user explicitly asks.
-5. Do NOT call multiple segmentation tools for the same request — pick exactly one.
-6. customer_type must be exactly one of: Business, Individual, All
-   If the user does NOT specify a customer type, default to All.
-7. n_clusters must be an integer 2-8, or 0 to auto-select. Default is 4.
-   If the user says "N clusters", "into N", "only N", or "I want N" (e.g. "cluster into 3", "I only want 2 clusters"),
-   set n_clusters=N exactly in the tool call. Do NOT ignore the user's requested count and do NOT default to 4.
-8. If the user asks to prepare or refresh the raw data — call prepare_segmentation_data first.
-9. After receiving segment_customers tool results: output ONE ### header, then ONE per-cluster bullet summarising key stats (customer count, avg weekly transactions, monthly volume, account age, alerts, SARs). Do NOT copy the raw stats block verbatim — write compact human-readable bullets. After follow-up queries that include [PREVIOUS CLUSTERING RESULT]: answer in ONE sentence using exact values from that block. Do NOT suggest thresholds, dollar cutoffs, or monitoring actions.
-10. If the user asks to show specific clusters (e.g. "show only cluster 3", "highest risk",
-    "top 2 high risk", "low activity clusters"):
-    - Identify which cluster number(s) match the request from the stats
-      (highest avg_trxn_amt = highest risk, lowest avg_num_trxns = lowest activity, etc.)
-    - On the VERY LAST LINE of your response, write EXACTLY this and nothing else:
-      DISPLAY_CLUSTERS: N
-      where N is a comma-separated list of cluster numbers (e.g. DISPLAY_CLUSTERS: 4  or  DISPLAY_CLUSTERS: 1,4)
-    - Do NOT mention this line in your text — it is a system directive, not for the user.
-    If the user does NOT ask to filter, do NOT include a DISPLAY_CLUSTERS line.
-11. Do NOT include JSON, code blocks, or raw data tables in your final reply.
-12. ONLY use numbers that appear in the tool result. Do NOT invent, estimate, or calculate new numbers.
-13. Do NOT invent threshold values, dollar amounts, or cutoffs. Only reference numbers explicitly present in the tool result. Do NOT suggest specific threshold values (e.g. "$250K", "< 80,000") unless they appear verbatim in the tool result.
-14. If the user asks which cluster to set a threshold for, or asks for threshold recommendations per cluster — do NOT invent values. Tell the user to use the threshold_tuning or sar_backtest tools with the relevant segment instead.
-15. If a [PREVIOUS CLUSTERING RESULT] block is provided in the context — answer from that data WITHOUT calling any tool for ANY of the following: (a) characterize, describe, compare, or explain a specific cluster; (b) identify which cluster has the highest or lowest value for any attribute (age, income, balance, transaction volume, account age, tenure); (c) rank clusters by any attribute; (d) answer questions about the oldest, youngest, richest, most active, or least active segment. Read the attribute values from the stats block and compare directly. Do NOT re-run clustering to answer attribute or ranking questions — the [PREVIOUS CLUSTERING RESULT] already has the data. For comparison questions ("how does cluster X compare to cluster Y"): compare each cluster's stats (avg_trxn_amt, monthly volume, balance, account age, customer count) attribute by attribute to identify what makes each distinctive — write a full multi-sentence comparison. Rule 9's one-sentence limit does NOT apply here.
-"""
+SYSTEM_PROMPT = (
+    "Look at the given data and respond strictly to the data and no more."
+)
 
 
 class SegmentationAgent(BaseAgent):
@@ -139,3 +135,9 @@ class SegmentationAgent(BaseAgent):
             system_prompt=SYSTEM_PROMPT,
             tools=TOOLS,
         )
+
+    def _stream_llm(self, **kwargs):
+        # Keep vLLM thinking ON for segmentation — needed for correct oldest/youngest
+        # cluster comparisons (numerical reasoning over decimal account ages).
+        kwargs.setdefault("extra_body", {})["chat_template_kwargs"] = {"enable_thinking": True}
+        return super()._stream_llm(**kwargs)

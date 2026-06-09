@@ -177,7 +177,8 @@ def prepare_data():
     cust_keep = ['customer_id', 'age', 'gender', 'marital_status', 'occupation',
                  'citizenship', 'gross_annual_income', 'nationality_country_id',
                  'residency_country_id', 'pep', 'is_314b', 'negative_news', 'ofac',
-                 'exempt_cdd', 'exempt_sanctions', 'naics', 'sic_code', 'entity']
+                 'exempt_cdd', 'exempt_sanctions', 'naics', 'sic_code', 'entity',
+                 'business_size', 'revenues', 'crypto_user', 'product']
     cust_keep = [c for c in cust_keep if c in cust.columns]
     cust = cust[cust_keep]
     print(f"  Customer features kept: {cust_keep}")
@@ -272,6 +273,38 @@ def prepare_data():
         labels=['New (0-1yr)', 'Established (>1yr)'],
         right=True,
     ).astype(str).replace('nan', 'Unknown')
+
+    # 22-product taxonomy derived columns
+    try:
+        from synth_products import occupation_group, revenue_band
+    except Exception:
+        occupation_group = lambda x: 'Unknown'
+        revenue_band     = lambda x: 'Unknown'
+
+    if 'business_size' in df.columns:
+        df['BUSINESS_SIZE'] = df['business_size'].fillna('').replace('', 'Unknown')
+    else:
+        df['BUSINESS_SIZE'] = 'Unknown'
+    if 'revenues' in df.columns:
+        df['REVENUE_BAND'] = df['revenues'].apply(revenue_band)
+    else:
+        df['REVENUE_BAND'] = 'Unknown'
+    if 'occupation' in df.columns:
+        df['OCCUPATION_GROUP'] = df['occupation'].apply(occupation_group)
+    else:
+        df['OCCUPATION_GROUP'] = 'Unknown'
+    if 'crypto_user' in df.columns:
+        df['CRYPTO_USER'] = df['crypto_user'].fillna(False).astype(bool).map(
+            {True: 'Yes', False: 'No'})
+    else:
+        df['CRYPTO_USER'] = 'No'
+    # product column already exists — keep as-is for the dim picker.
+    # Drop the lowercase raw columns now that we have the capitalized derived bands —
+    # discover_dims lowercases names when checking _DIM_EXCLUDE, so leaving both would
+    # let the raw versions block the derived ones from surfacing.
+    for _drop in ('business_size', 'revenues', 'crypto_user', 'occupation'):
+        if _drop in df.columns:
+            df = df.drop(columns=[_drop])
 
     # ── 9. Summary ───────────────────────────────────────────────────
     print("\n--- Output Summary ---")

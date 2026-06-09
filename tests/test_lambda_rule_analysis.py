@@ -93,6 +93,78 @@ class TestRuleCatalogue:
                 assert "current" in sp, f"Missing 'current' in {key}.{param_name}"
                 assert "desc" in sp, f"Missing 'desc' in {key}.{param_name}"
 
+    def test_full_rule_count(self):
+        # 16 classic rules + 5 modern typology rules = 21
+        assert len(RULE_CATALOGUE) == 21
+
+
+# ── Modern typology rules (Chain-Hop, Mule, Hyper-Frag, Algo-Cohort, Auto-Disp) ──
+
+class TestModernTypologyRules:
+    """The 5 modern typology rules added during the XL scale-up. Each has
+    sweep_params keyed to alert-meta columns produced by the corresponding
+    injector in generate_synthetic_data.py."""
+
+    MODERN_RULES = [
+        ("chain-hop rapid (crypto)",      "Chain-Hop Rapid (Crypto)"),
+        ("mule activation",                "Mule Activation"),
+        ("hyper-fragmentation (p2p)",      "Hyper-Fragmentation (P2P)"),
+        ("algorithmic recruited cohort",   "Algorithmic Recruited Cohort"),
+        ("autonomous dispersal",           "Autonomous Dispersal"),
+    ]
+
+    @pytest.mark.parametrize("key,expected_name", MODERN_RULES)
+    def test_modern_rule_registered(self, key, expected_name):
+        assert key in RULE_CATALOGUE
+        assert RULE_CATALOGUE[key]["name"] == expected_name
+
+    @pytest.mark.parametrize("key,_n", MODERN_RULES)
+    def test_modern_rule_has_floor_amount_sweep(self, key, _n):
+        # Every modern rule supports a trigger_amt-based sweep
+        assert "floor_amount" in RULE_CATALOGUE[key]["sweep_params"]
+
+    @pytest.mark.parametrize("key,_n", MODERN_RULES)
+    def test_modern_rule_has_default_2d(self, key, _n):
+        d2d = RULE_CATALOGUE[key]["default_2d"]
+        assert isinstance(d2d, tuple)
+        assert len(d2d) == 2
+
+    def test_chain_hop_uses_n_hops_column(self):
+        entry = RULE_CATALOGUE["chain-hop rapid (crypto)"]
+        assert entry["sweep_params"]["min_hops"]["col"] == "n_hops"
+
+    def test_mule_activation_uses_dispersal_count_column(self):
+        entry = RULE_CATALOGUE["mule activation"]
+        assert entry["sweep_params"]["min_dispersal"]["col"] == "dispersal_count"
+
+    def test_algorithmic_cohort_uses_cohort_size_column(self):
+        entry = RULE_CATALOGUE["algorithmic recruited cohort"]
+        assert entry["sweep_params"]["min_cohort_size"]["col"] == "cohort_size"
+
+    def test_hyper_fragment_uses_txn_count_column(self):
+        entry = RULE_CATALOGUE["hyper-fragmentation (p2p)"]
+        assert entry["sweep_params"]["min_txn_count"]["col"] == "txn_count"
+
+    def test_autonomous_dispersal_uses_txn_count_column(self):
+        entry = RULE_CATALOGUE["autonomous dispersal"]
+        assert entry["sweep_params"]["min_leg_count"]["col"] == "txn_count"
+
+    @pytest.mark.parametrize("query,expected_substr", [
+        # _match_rule is substring-based on the lowercase catalogue keys.
+        # The catalogue key is "chain-hop rapid (crypto)" so the query must
+        # share a substring with that — "chain-hop" works, "chain hop"
+        # without a hyphen does not.
+        ("chain-hop", "Chain-Hop"),
+        ("mule activation", "Mule Activation"),
+        ("hyper-fragmentation", "Hyper-Fragmentation"),
+        ("algorithmic recruited", "Algorithmic Recruited"),
+        ("autonomous dispersal", "Autonomous Dispersal"),
+    ])
+    def test_modern_rule_keyword_match(self, query, expected_substr):
+        name, _ = _match_rule(query)
+        assert name is not None
+        assert expected_substr in name
+
 
 # ── _match_rule ────────────────────────────────────────────────────────────────
 

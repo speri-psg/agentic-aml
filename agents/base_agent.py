@@ -5,6 +5,7 @@ import re
 import sys
 import os
 import threading
+import time
 from types import SimpleNamespace
 from openai import OpenAI
 
@@ -13,27 +14,38 @@ stop_event = threading.Event()
 
 
 def _strip_thinking(text: str) -> str:
-    """Strip Gemma 4 thinking preamble from Ollama responses (safety net — think:false preferred)."""
+    """Strip Gemma 4 thinking preamble and special tokens from response text."""
     if not text:
         return text
-    # Current Ollama format: "Thinking...\n...\n...done thinking.\n\n<answer>"
+    # vLLM format: <think>...</think> (safety net — --reasoning-parser gemma4 may miss these)
+    if "<think>" in text:
+        cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+        if cleaned:
+            text = cleaned
+        else:
+            # </think> missing (truncated response) — keep only text before the tag
+            idx = text.find("<think>")
+            text = text[:idx].strip() if idx > 0 else text
+    # Ollama format: "Thinking...\n...\n...done thinking.\n\n<answer>"
     if text.startswith("Thinking..."):
         marker = "...done thinking."
         idx = text.find(marker)
         if idx != -1:
-            return text[idx + len(marker):].strip()
-        return "\n".join(text.splitlines()[1:]).strip()
+            text = text[idx + len(marker):].strip()
+        else:
+            text = "\n".join(text.splitlines()[1:]).strip()
     # Legacy format: "Thinking Process:\n1. ...\n<answer>"
-    if text.startswith("Thinking Process:"):
+    elif text.startswith("Thinking Process:"):
         lines = text.splitlines()
         last_num_idx = -1
         for i, line in enumerate(lines):
             if re.match(r"^\d+\.", line.strip()):
                 last_num_idx = i
         if last_num_idx == -1:
-            return "\n".join(lines[1:]).strip()
-        answer = "\n".join(lines[last_num_idx + 1:]).strip()
-        return answer if answer else text
+            text = "\n".join(lines[1:]).strip()
+        else:
+            answer = "\n".join(lines[last_num_idx + 1:]).strip()
+            text = answer if answer else text
     return text
 
 # Sentinel raised by _stream_llm when stop_event fires mid-stream
@@ -166,7 +178,11 @@ def _parse_tool_call_from_content(content: str) -> tuple | None:
             pair = pair.strip()
             if ':' in pair:
                 k, v = pair.split(':', 1)
-                k, v = k.strip(), v.strip()
+                # Strip Gemma 4 special quote tokens that appear when thinking is active
+                k = re.sub(r'<\|[^|]*\|>', '', k).strip('" \'')
+                v = re.sub(r'<\|[^|]*\|>', '', v).strip('" \'')
+                if not k:
+                    continue
                 try:
                     args[k] = int(v)
                 except ValueError:
@@ -253,6 +269,34 @@ def _parse_tool_call_from_content(content: str) -> tuple | None:
     # Format 5: natural language — "call [the] `tool_name`"
     # Only match if the captured word is a known tool name or alias — prevents common English
     # words like "has", "algorithm", "function" from being mistaken for tool calls.
+    #
+    # Refusal/clarification gate (added 2026-06-08 PM): skip NL parsing entirely
+    # when the content reads like a refusal or a clarification request. When the
+    # model says "I do not have a rule named X, please use the list_rules tool"
+    # or "I need a specific rule name, you can use list_rules to see them",
+    # the tool name appears in a sentence addressed to the user — NOT a directive
+    # to make a tool call. Extracting from refusals caused production misroutes:
+    # SAR backtest queries for shorthand rule names ('Crypto', 'ACH', 'Mule')
+    # landed on list_rules instead of rule_sar_backtest, producing ranking
+    # garbage instead of an honest "I don't recognize that name" surfaced to the
+    # user. (Diagnosed via _smoke_tool_choice_none.py — model emits refusal text,
+    # old NL parser obediently extracted whatever tool name was mentioned.)
+    # Surfacing the refusal directly is the model-not-tool honest behavior.
+    _refusal_patterns = [
+        r"\bi (?:do not|don't) have\b",
+        r"\bi (?:cannot|can't) find\b",
+        r"\bi (?:do not|don't) know\b",
+        r"\bi(?:'m| am) not sure\b",
+        r"\bi(?:'m| am) sorry\b",
+        r"\bi need (?:a |an |the |to know |you to |some |more |you )",
+        r"\bplease (?:provide|specify|use|tell|clarify)\b",
+        r"\byou (?:can|could|may) use\b",
+        r"\bif you (?:would|want|'d) like\b",
+    ]
+    if any(re.search(p, content, re.IGNORECASE) for p in _refusal_patterns):
+        print(f"[base_agent] fallback parse (NL format): SKIPPED — refusal/clarification detected")
+        return None
+
     _nl_valid_tools = _known_tools | set(_TOOL_NAME_ALIASES.keys()) | {
         "segment_stats", "cluster_rule_summary", "ofac_screening", "ofac_name_lookup",
         "sar_backtest",
@@ -300,11 +344,20 @@ class BaseAgent:
         Raises _Stopped if stop_event fires during streaming.
         """
         kwargs = {**kwargs, "stream": True}
+        # Timing instrumentation — measure prefill (time-to-first-chunk) and total wall time
+        _msgs = kwargs.get("messages", [])
+        _msg_chars = sum(len(m.get("content") or "") for m in _msgs)
+        _tools = kwargs.get("tools") or []
+        _tools_chars = len(json.dumps(_tools)) if _tools else 0
+        _t_start = time.perf_counter()
+        _t_first_chunk = None
         stream = self.client.chat.completions.create(**kwargs)
         content_parts = []
         tc_acc = {}  # index → {id, name, arguments}
         try:
             for chunk in stream:
+                if _t_first_chunk is None:
+                    _t_first_chunk = time.perf_counter()
                 if stop_event.is_set():
                     stream.close()
                     raise _Stopped()
@@ -335,6 +388,18 @@ class BaseAgent:
             tc = tc_acc[i]
             fn = SimpleNamespace(name=tc["name"], arguments=tc["arguments"])
             tool_calls.append(SimpleNamespace(id=tc["id"] or f"tc_{i}", function=fn))
+        # Timing summary — prefill ≈ ttfc, decode = total - ttfc
+        _t_total = time.perf_counter() - _t_start
+        _ttfc = (_t_first_chunk - _t_start) if _t_first_chunk else _t_total
+        _decode = _t_total - _ttfc
+        _out_chars = len(content or "") + sum(len(t["arguments"]) for t in tc_acc.values())
+        print(
+            f"[timing] {self.name} stream: total={_t_total:.2f}s "
+            f"ttfc={_ttfc:.2f}s decode={_decode:.2f}s | "
+            f"prompt_msgs={len(_msgs)}/{_msg_chars}ch tools={len(_tools)}/{_tools_chars}ch | "
+            f"out={_out_chars}ch ({len(tool_calls)} tc)",
+            flush=True,
+        )
         return SimpleNamespace(content=content, tool_calls=tool_calls if tool_calls else None)
 
     def run(self, query: str, tool_executor, policy_context: str = "", history: list = None) -> tuple:
@@ -348,6 +413,22 @@ class BaseAgent:
         if history:
             messages.extend(history)
         messages.append({"role": "user", "content": user_content})
+
+        print(f"[base_agent] msgs to model ({len(messages)} total):", flush=True)
+        for i, m in enumerate(messages):
+            role = m.get("role", "?")
+            content = m.get("content") or ""
+            tool_calls = m.get("tool_calls")
+            if role == "system":
+                print(f"  [{i}] system: ({len(content)} chars)", flush=True)
+            elif tool_calls:
+                tc = tool_calls[0] if isinstance(tool_calls, list) else tool_calls
+                name = tc.get("function", {}).get("name", "?") if isinstance(tc, dict) else getattr(getattr(tc, "function", None), "name", "?")
+                print(f"  [{i}] assistant tool_call: {name}", flush=True)
+            else:
+                preview = content[:120].replace("\n", " ")
+                print(f"  [{i}] {role}: {repr(preview)}", flush=True)
+
         chart_results = []
         tool_call_count = 0
 
@@ -356,7 +437,7 @@ class BaseAgent:
             max_tokens=MAX_TOKENS_TOOL,
             temperature=0,
             messages=messages,
-            extra_body={"think": False},
+            extra_body={"think": False, "chat_template_kwargs": {"enable_thinking": False}},
         )
         if self.tools:
             create_kwargs["tools"] = self.tools
@@ -387,10 +468,13 @@ class BaseAgent:
                     args = _normalize_args(name, args)
                     structured_calls.append((name, args, tc.id))
 
-                # Record assistant turn with original tool_calls for context
+                # Record assistant turn with original tool_calls for context.
+                # content=None — Ollama with think=True leaks thinking into delta.content
+                # even when structured tool_calls are returned; storing it pollutes history
+                # and causes the second LLM call to return 0 chars.
                 messages.append({
                     "role": "assistant",
-                    "content": msg.content,
+                    "content": None,
                     "tool_calls": [
                         {
                             "id": tc.id,
@@ -452,10 +536,22 @@ class BaseAgent:
 
                     # Use tool role — matches Gemma 4 training format <|turn>tool
                     # Prefix matches training data: "Tool result for {name}:\n{content}"
+                    # Trailing synthesis nudge — see feedback_instruction_placement: data-turn
+                    # cues beat system-prompt rules. Forces analyst-style synthesis instead of
+                    # verbatim echo, AND demands specific references (rule/segment/cluster names)
+                    # — "be specific" moved here from the system prompt for stronger anchoring.
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc_id,
-                        "content": f"Tool result for {name}:\n{result_text}",
+                        "content": (
+                            f"Tool result for {name}:\n{result_text}"
+                            f"\n\nSynthesize the observations above into 2-3 insightful sentences "
+                            f"for the analyst. Be specific — name the rule, segment, cluster, "
+                            f"parameter, and values explicitly rather than saying \"the rule\" or "
+                            f"\"the data\". "
+                            f"Plain text only — no LaTeX, no dollar-sign math wrappers. "
+                            f"Write '>= 90%' or '90% or more', not '$\\ge 90\\%$'."
+                        ),
                     })
 
                 tool_call_count += 1
@@ -465,23 +561,45 @@ class BaseAgent:
                     create_kwargs.pop("tools", None)
                     create_kwargs.pop("tool_choice", None)
 
-                # ── DEBUG: log messages sent to model after tool call ─────────
-                print(f"\n[{self.name}] DEBUG — messages sent to model after tool call #{tool_call_count}:")
-                for i, m in enumerate(messages):
-                    role = m.get("role", "?")
-                    content = m.get("content") or ""
-                    tc = m.get("tool_calls")
-                    preview = content[:300].replace("\n", "\\n") if content else "(no content)"
-                    if tc:
-                        print(f"  [{i}] {role}: [tool_calls={[t['function']['name'] for t in tc]}] {preview}")
-                    else:
-                        print(f"  [{i}] {role}: {preview}")
-                print(f"[{self.name}] DEBUG — end messages\n")
-
             else:
                 # No tool call found — final text response.
-                final_text = msg.content or ""
-                return _strip_thinking(final_text), chart_results
+                final_text = _strip_thinking(msg.content or "")
+
+                # If model produced no synthesis text BUT a tool just ran, surface
+                # the tool's content directly. Common case: rule-guard refusal
+                # message went into the tool slot and the model returned 0 chars
+                # in the synthesis pass — producing a silent 'No response' in the
+                # UI. Better to show the (already user-friendly) refusal than
+                # nothing. Strip the trailing synthesis nudge before surfacing.
+                if not final_text.strip():
+                    last_tool_msg = next(
+                        (m for m in reversed(messages) if m.get("role") == "tool"),
+                        None,
+                    )
+                    if last_tool_msg:
+                        tool_content = (last_tool_msg.get("content") or "").strip()
+                        # Strip the leading "Tool result for X:\n" prefix
+                        tool_content = re.sub(
+                            r"^Tool result for \w+:\s*", "", tool_content
+                        )
+                        # Strip the trailing synthesis-nudge block (added in the
+                        # tool message — starts at the first 'Synthesize the
+                        # observations above' sentinel).
+                        tool_content = re.split(
+                            r"\n\s*Synthesize the observations above",
+                            tool_content, maxsplit=1,
+                        )[0].strip()
+                        if tool_content:
+                            print(f"[{self.name}] empty model output — surfacing last tool content directly ({len(tool_content)} chars)")
+                            return tool_content, chart_results
+                    # No tool ran either — fall through to a generic hint
+                    final_text = (
+                        "I could not produce a response for that query. "
+                        "Please rephrase — for rule-specific queries, try adding "
+                        "the word 'rule' after the name (e.g., 'Show SAR backtest "
+                        "for Velocity Single rule')."
+                    )
+                return final_text, chart_results
 
         # Exceeded max iterations — return whatever text we have
         print(f"[{self.name}] WARNING: hit MAX_TOOL_ITERATIONS ({MAX_TOOL_ITERATIONS})")

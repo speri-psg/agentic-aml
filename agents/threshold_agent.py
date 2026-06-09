@@ -77,10 +77,16 @@ TOOLS = [
         "function": {
             "name": "sar_backtest",
             "description": (
-                "Backtest a threshold column against simulated SAR (Suspicious Activity Report) data. "
-                "Shows how many of the simulated SAR customers would have been caught vs. missed "
-                "at each threshold level. Use this when the user asks about SAR catch rate, "
-                "SAR detection rate, how many SARs a threshold would catch, or backtest analysis."
+                "SEGMENT-LEVEL SAR backtest. Sweep a customer-attribute threshold "
+                "(monthly transaction amount, weekly transaction count, etc.) across "
+                "an ENTIRE customer segment (Business or Individual) — NOT for a "
+                "specific AML rule. Use ONLY when the user names a customer segment "
+                "and a threshold column WITHOUT naming a specific rule. Examples: "
+                "'SAR backtest for Business customers on monthly transaction amount', "
+                "'Show SAR catch rate for Individual customers', "
+                "'Backtest threshold for Business segment'. "
+                "If the user names a specific AML rule (Elder Abuse, Velocity Single, "
+                "Mule, Crypto, etc.), use rule_sar_backtest instead, NOT this tool."
             ),
             "parameters": {
                 "type": "object",
@@ -146,6 +152,10 @@ TOOLS = [
                         "description": (
                             "Optional behavioral cluster number (1–4) from dynamic segmentation. "
                             "When specified, the sweep runs only on customers in that cluster. "
+                            "Cluster resolves against the segment of the most recent clustering "
+                            "(Business or Individual); if no clustering ran this session, falls "
+                            "back to all-customer clustering and the tool result will include a "
+                            "note stating the segment used — include that note in your response. "
                             "Use this when the user asks about a specific segment cluster "
                             "(e.g. 'show Elder Abuse sweep for Cluster 4')."
                         ),
@@ -163,7 +173,10 @@ TOOLS = [
                 "List all available AML detection rules with their SAR count, "
                 "false positive count, and precision. Use this when the user asks which rules "
                 "exist, which rules generate the most FPs, a rule performance overview, "
-                "or when no specific rule name is given."
+                "or when no specific rule name is given. "
+                "Also call this whenever the user references a rule by number (e.g. 'Rule 7', "
+                "'metrics for Rule 12'); the result includes 'Rule N:' prefixes so you can "
+                "resolve the number to the rule name and answer from that data."
             ),
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
@@ -173,12 +186,17 @@ TOOLS = [
         "function": {
             "name": "rule_sar_backtest",
             "description": (
-                "For a specific named AML rule, sweep a rule condition parameter and show "
-                "how many SAR customers are caught vs. missed at each threshold level. "
-                "Use this when the user names a specific rule (e.g. 'Elder Abuse', "
-                "'Velocity Single', 'Activity Deviation ACH', 'CTR Client', 'Detect Excessive') "
-                "and asks about its SAR filing rate, SAR catch rate, SAR detection rate, "
-                "SAR backtest, or rule-level FP/FN performance."
+                "RULE-LEVEL SAR backtest. Sweep a rule condition parameter for ONE "
+                "specific AML rule. Use ONLY when the user names a specific rule "
+                "(Elder Abuse, Velocity Single, Activity Deviation ACH, CTR Client, "
+                "Detect Excessive, Mule, Crypto, Funnel, etc.). Examples: "
+                "'SAR backtest for Elder Abuse', 'rule SAR catch rate for Crypto', "
+                "'how does Velocity Single perform on SARs'. "
+                "Do NOT use this for SEGMENT-LEVEL queries (Business or Individual "
+                "customers without a named rule) — use sar_backtest for those. "
+                "If the user references a rule by number (e.g. 'Rule 7'), call "
+                "list_rules first to resolve the rule name, then call this tool "
+                "with the resolved name as risk_factor."
             ),
             "parameters": {
                 "type": "object",
@@ -194,13 +212,10 @@ TOOLS = [
                     "sweep_param": {
                         "type": "string",
                         "description": (
-                            "Which condition parameter to sweep. "
-                            "Activity Deviation (ACH): floor_amount or z_threshold. "
-                            "Activity Deviation (Check): floor_amount or z_threshold. "
-                            "Elder Abuse: floor_amount, z_threshold, or age_threshold. "
-                            "Velocity Single: pair_total. "
-                            "Detect Excessive: floor_amount. "
-                            "Omit to use each rule's default."
+                            "OPTIONAL. Omit by default — the tool picks the rule's "
+                            "primary sweep parameter (typically floor_amount). Only set "
+                            "this when the user explicitly names a parameter to sweep "
+                            "(e.g. 'sweep z_threshold', 'try age_threshold')."
                         ),
                     },
                     "cluster": {
@@ -208,6 +223,10 @@ TOOLS = [
                         "description": (
                             "Optional behavioral cluster number (1–4) from dynamic segmentation. "
                             "When specified, the SAR backtest runs only on customers in that cluster. "
+                            "Cluster resolves against the segment of the most recent clustering "
+                            "(Business or Individual); if no clustering ran this session, falls "
+                            "back to all-customer clustering and the tool result will include a "
+                            "note stating the segment used — include that note in your response. "
                             "Use this when the user asks about a specific segment cluster "
                             "(e.g. 'show Elder Abuse SAR backtest for Cluster 2')."
                         ),
@@ -233,7 +252,14 @@ TOOLS = [
                 "properties": {
                     "cluster": {
                         "type": "integer",
-                        "description": "Behavioral cluster number (1–4) to filter all rules to.",
+                        "description": (
+                            "Behavioral cluster number (1–4) to filter all rules to. "
+                            "Resolves against the segment of the most recent clustering "
+                            "(Business or Individual); if no clustering ran this session, "
+                            "falls back to all-customer clustering and the tool result will "
+                            "include a note stating the segment used — include that note in "
+                            "your response."
+                        ),
                     },
                 },
                 "required": ["cluster"],
@@ -290,58 +316,15 @@ TOOLS = [
     },
 ]
 
-SYSTEM_PROMPT = f"""\
-You are ARIA — Agentic Risk Intelligence for AML. You analyze false positive (FP) and \
-false negative (FN) trade-offs as AML alert thresholds change, and run SAR backtests and \
-2D sweeps for AML rule performance. \
-IMPORTANT: You MUST respond entirely in English. Do NOT use any Chinese or other non-English characters.
-FORMATTING: Plain text only — NEVER use LaTeX or math notation. Do not wrap variable names, percentages, or formulas in dollar signs. Do not use backslash math commands. Write 'z_threshold = 3.0' not a LaTeX expression. Write 'TP rate = 100%' not a LaTeX expression. Write '>= 90%' not a LaTeX symbol.
-
-DEFINITIONS (always apply these exactly — do not contradict them):
-- TP (True Positive): SAR customer who IS alerted — correctly caught suspicious activity.
-- FP (False Positive): Non-SAR customer who IS alerted — unnecessary investigation. HIGHER threshold → FEWER FPs.
-- FN (False Negative): SAR customer who is NOT alerted — missed suspicious activity. HIGHER threshold → MORE FNs.
-- TN (True Negative): Non-SAR customer who is NOT alerted — correctly silent.
-- TP rate: TP / (TP + FN) — share of SAR customers caught. Also called recall or sensitivity.
-- Precision: TP / (TP + FP) — share of alerts that are genuine SARs.
-- Crossover: the threshold where FP and FN counts are closest — the optimal operating point.
-- Raising the threshold reduces investigator workload (fewer alerts, fewer FPs) but increases FNs (missed SARs).
-- Lowering the threshold catches more SARs (fewer FNs) but generates more FPs.
-
-{_RULE_INVENTORY}
-
-RULES — follow these exactly:
-1. ALWAYS call a tool. Never answer threshold or alert questions from memory. EXCEPTION: if the user provides invalid parameters (threshold_min, threshold_max, threshold_step, step, min_threshold) or an invalid threshold_column, do NOT call any tool — follow Rule 14 instead.
-2. For any question about FP, FN, threshold, alert rates, or transactions — call threshold_tuning.
-3. For general segment counts, totals, or dataset summaries ("how many customers", "how many alerts", "summary of the data", "total accounts", "customers and alerts in the dataset", "segment breakdown", "segment overview") — call segment_stats. NEVER answer count questions from memory. Do NOT call segment_stats for SAR catch rate or threshold questions — use sar_backtest for those (Rule 4).
-4. For general SAR catch rate or SAR filing rate by SEGMENT (Business, Individual) with no specific rule named — call sar_backtest. This includes queries like "how well do we catch SARs", "SAR hit rate", "how many SARs are we catching", "SAR performance at current thresholds", "what percentage of SARs are filed". Do NOT use segment_stats for these — segment_stats shows FP/FN counts but not threshold-sweep SAR catch rates. If the user names a specific rule (e.g. "Elder Abuse", "Velocity Single", "CTR Client") — use rule_sar_backtest instead (see Rule 15). IMPORTANT: if the user does not specify a threshold_column, use AVG_TRXNS_WEEK — do NOT ask for clarification, call sar_backtest immediately.
-5. threshold_column must be exactly one of: AVG_TRXNS_WEEK, AVG_TRXN_AMT, TRXN_AMT_MONTHLY
-6. segment must be exactly one of: Business, Individual
-7. If the user does not specify a segment, default to Business.
-8. If the user does not specify a threshold column, default to AVG_TRXNS_WEEK.
-9. After receiving tool results: (a) First output ONE ### header line naming the analysis — e.g. "### AML Rule Performance Overview", "### SAR Backtest — Elder Abuse | z_threshold", "### 2D Sweep — Elder Abuse | Floor Amount × Age Threshold", "### Threshold Sweep — Business | Avg Weekly Transactions", "### SAR Catch Rate — Business | Monthly Transaction Volume", "### Dataset Summary", "### Rule Performance — Cluster 3". (b) Then write ONE sentence of AML domain insight derived from the tool result. Do NOT copy or re-echo the PRE-COMPUTED section — the chart panel renders it automatically. Do NOT include any tables, bullet lists, or numerical summaries in your response.
-10. Do NOT fabricate, paraphrase, round, or restate numbers from the tool result differently in your insight sentence.
-11. Do NOT include JSON or code blocks in your final reply.
-12. Call the tool ONCE only. After receiving the tool result, write your final response immediately.
-13. Do NOT compute, derive, or extrapolate any numbers not explicitly stated in the tool result. No rates, averages, differences, or trends unless the tool result contains them. If a number is not in the tool result, do not mention it.
-14. If the user provides invalid parameters such as threshold_min, threshold_max, threshold_step, step, or min_threshold, OR requests a threshold_column that is not one of AVG_TRXNS_WEEK, AVG_TRXN_AMT, TRXN_AMT_MONTHLY (e.g. daily balance, balance, net income, credit score, income, equity) — do NOT call the tool. State that the column is not available and list the three valid threshold_column options (AVG_TRXNS_WEEK, AVG_TRXN_AMT, TRXN_AMT_MONTHLY). Ask the user to specify one of these instead.
-15. For any question about a specific AML rule's SAR performance, rule-level FP/FN analysis, or what happens to FP/FN if a rule condition parameter changes — call rule_sar_backtest with risk_factor (e.g. "Activity Deviation (ACH)", "Activity Deviation (Check)", "Elder Abuse", "Velocity Single", "Detect Excessive") and optionally sweep_param (floor_amount, z_threshold, age_threshold, pair_total, ratio_tolerance, time_window). If the user has not specified a rule, call list_rules first.
-16. For any question listing, categorizing, or counting a SUBSET of rules (e.g. "list all AML rules", "what are the AML rules in the system", "what rules check for unusual activity", "how many structuring rules") — call list_rules to retrieve live SAR/FP data alongside rule names. Use the RULE INVENTORY above only for pure name-only lookups when no performance data is needed. Total rule COUNT queries ("how many rules", "count the rules", "how many AML rules") are handled by Rule 22 without calling list_rules. Sweep-parameter filter queries are handled by Rule 29 without calling list_rules.
-17. For any question about how TWO condition parameters interact, a 2D analysis, optimizing two thresholds simultaneously, or a grid/heatmap of FP vs SAR — call rule_2d_sweep with risk_factor and optionally sweep_param_1 and sweep_param_2.
-18. Do NOT describe UI interactions, chart features, or actions the user can take in the interface (e.g. "hover to see", "right-click to select", "click the cell"). The chart panel renders all results automatically. Say nothing about the chart in your response.
-19. When the user asks about a specific behavioral cluster (e.g. "Cluster 3", "cluster 4"), pass the cluster number as an integer to the cluster parameter of rule_sar_backtest or rule_2d_sweep. Do NOT pass cluster to threshold_tuning, sar_backtest, or segment_stats — those tools do not accept a cluster parameter.
-20. For threshold_tuning, sar_backtest, segment_stats, list_rules, cluster_rule_summary, and cluster_threshold_analysis results — ONE insight sentence only. Do NOT add a second sentence or parenthetical. Do NOT say "zero false positives" or "zero FNs" if the tool result shows FP > 0 or FN > 0. For rule_sar_backtest and rule_2d_sweep results — write 3–5 sentences using actual numbers from the tool result: (a) state the current parameter value(s) and their TP rate and FP count, (b) identify the setting that maximises precision while maintaining TP rate >= 90% with its specific TP, FP, and precision values, (c) describe what happens to TP rate and FPs if the parameter is pushed further beyond that point, and (d) give a specific recommended change versus current. Use only numbers that appear in the tool result — do NOT fabricate values. For rule_2d_sweep only: do NOT describe heatmap cell positions (e.g. "top-left", "bottom-right", "highest density cell").
-21. If the user asks about "highest FP rate" or "worst precision" — they mean precision=0.0%, NOT the highest raw FP count. Rules with SAR=0 and precision=0.0% have the highest FP rate. Name those rules specifically.
-22. The system monitors exactly {_N_RULES} AML detection rules — see the RULE INVENTORY above. When the user asks how many rules exist (e.g. "how many rules", "count the rules", "how many AML rules"), state '{_N_RULES}' directly from the inventory. Do NOT call list_rules just to count rules.
-23. If the user asks about a rule by a name that does not appear in the RULE INVENTORY (e.g. "layering", "smurfing") — state that no rule by that name exists and list the {_N_RULES} rule names from the RULE INVENTORY. Do NOT guess which rule "covers" the concept.
-24. For any question about how ALL rules perform for a specific behavioral cluster — call cluster_rule_summary with the cluster number. Do NOT call list_rules or loop over rule_sar_backtest for this.
-25. If a previous tool call returned an error about an invalid sweep parameter (e.g. "Unknown sweep_param_1" or "Unknown sweep_param_2"), and you asked the user to choose a valid parameter, and the user's reply is a parameter name (e.g. floor_amount, z_threshold, age_threshold, pair_total, ratio_tolerance, time_window, min_transactions, days_required, daily_floor) — do NOT treat it as a new query. Resume the previous rule_2d_sweep or rule_sar_backtest call with the same risk_factor, keeping all valid parameters unchanged and replacing only the invalid one with the user's corrected choice.
-26. For pure definitional or conceptual questions about TP, FP, FN, TN, precision, recall, crossover, threshold tuning, the effect of raising or lowering thresholds on FP/FN counts, or what a 2D grid/sweep shows — answer DIRECTLY using the DEFINITIONS section above and your AML knowledge. Do NOT call any tool. Give a complete explanation: what the concept means, why it matters in AML transaction monitoring, and how it works in practice. No length limit.
-27. For questions about per-cluster adaptive thresholds, how behavioral segmentation improves alert sensitivity, cluster-specific threshold recommendations, or reducing false positives by customer cluster — call cluster_threshold_analysis with segment and threshold_column. Optionally pass n_clusters (default 4) and target_sar_rate (default 0.90). Do NOT call threshold_tuning or sar_backtest for this — cluster_threshold_analysis already computes the uniform baseline internally.
-28. In both cases below, report the top 3 rules unless the user specifies a different count. When the user asks about "highest precision", "best precision", "most precise rules", "top N by precision", or "top precision" — if a RULE LIST block (=== RULE LIST === ... === END RULE LIST ===) is already in the context, read the precision=X% values directly from it and sort DESCENDING; otherwise call list_rules first. When the user asks about "lowest precision", "worst precision", "least precise rules", or "bottom N by precision" — sort ASCENDING. Report the requested count (default 3). High precision = high SAR%, low FP ratio. Do NOT sort by FP count. Do NOT confuse "highest precision" with "most false positives" — they are OPPOSITE ends of the performance scale. Rules with the largest FP counts have the LOWEST precision.
-29. For questions about which rules support a specific sweep parameter (e.g., "which rules have z_threshold", "which rules have floor_amount", "which rules can be swept") — filter the RULE INVENTORY above directly; do NOT call list_rules for this. For questions about what a parameter means or does — answer directly: z_threshold is the std-dev multiplier above the customer's activity mean; floor_amount is the minimum transaction amount (or sum) to trigger the rule; daily_floor is the minimum daily cash amount for a qualifying day; ratio_tolerance is the max deviation of the out/in ratio from 1.0; pair_total is the minimum combined in+out pair amount; days_required is the minimum number of qualifying days in the observation window; time_window is the aggregation window in days; min_transactions is the minimum number of transactions in the window; min_counterparties is the minimum number of distinct counterparties; return_window is the maximum days between the outgoing and return leg; age_threshold is the minimum customer age to trigger.
-30. If a RULE LIST block (=== RULE LIST === ... === END RULE LIST ===) is present in the context, it contains live SAR/FP performance data for all AML rules. It is the authoritative source — do NOT call list_rules again, do NOT use memorized or assumed values. For ANY ranking, sorting, or filtering query ("top N by precision", "bottom N by precision", "most SARs", "fewest SARs", "highest FP", "lowest FP", "how about the top 3", "how about the bottom 3") — enumerate each rule and its value from that block, sort, then report.
-"""
+SYSTEM_PROMPT = (
+    "Look at the given data and respond strictly to the data and no more. "
+    "When the user references a rule by shorthand or partial name (e.g. "
+    "'Crypto', 'ACH', 'Mule', 'Funnel') and the exact name is not in your "
+    "rule index, resolve it to the closest matching canonical rule name "
+    "and call the requested tool with that name as the risk_factor argument. "
+    "Do not stop after identifying the match — actually run the tool the "
+    "user asked for."
+)
 
 
 _INVALID_PARAMS = {
@@ -349,13 +332,32 @@ _INVALID_PARAMS = {
     "step", "min_threshold",
 }
 
+# Queries containing these terms are ranking/sorting/counting questions answerable directly
+# from an injected rule list — route to _run_with_rule_list (no tool call).
+# Everything else (SAR backtest, 2D sweep, threshold tuning, etc.) must call a live tool,
+# so the rule list context is dropped and the regular agentic loop runs instead.
+#
+# Additions 2026-06-08 (challenge / elliptical-follow-up recognition):
+#   what about / does it / doesn't it / shouldn't / actually
+# Catches user pushback patterns like 'what about Elder Abuse does it not have
+# high SARs' where the user is challenging a prior ranking. Lets the model
+# re-read the injected rule list and revise its answer instead of falling
+# through to a tool call that doesn't address the challenge.
+_RANKING_QUERY_TERMS = frozenset({
+    "top", "bottom", "most", "least", "best", "worst",
+    "highest", "lowest", "fewest", "how many", "how about",
+    "which has", "which rules", "which is", "list all",
+    "the same", "same by",
+    "what about", "does it", "doesn't it", "doesnt it",
+    "shouldn't", "shouldnt", "actually",
+})
+
 _REJECTION_MSG = (
     "threshold_min, threshold_max, threshold_step, step, and min_threshold are NOT valid "
     "parameters. The only valid parameters are segment (Business or Individual) and "
     "threshold_column (AVG_TRXNS_WEEK, AVG_TRXN_AMT, or TRXN_AMT_MONTHLY). "
     "Please specify one of those instead."
 )
-
 
 class ThresholdAgent(BaseAgent):
     def __init__(self):
@@ -366,34 +368,37 @@ class ThresholdAgent(BaseAgent):
         )
 
     def _stream_llm(self, **kwargs):
-        # Enable thinking for ranking/sorting tasks (16-rule sort requires chain-of-thought)
-        if "extra_body" in kwargs:
-            kwargs["extra_body"] = {**kwargs["extra_body"], "think": True}
-        else:
-            kwargs["extra_body"] = {"think": True}
+        from config import BACKEND_THINK
+        if BACKEND_THINK:
+            kwargs.setdefault("extra_body", {})["think"] = True
+            if kwargs.get("max_tokens", 0) <= 2048:
+                kwargs["max_tokens"] = 4096
         return super()._stream_llm(**kwargs)
 
     def _run_with_rule_list(self, query: str, rule_list: str, history: list) -> tuple:
         """Answer a ranking/sorting query using rule list data embedded in the user message.
 
-        Sends: system → history → user("Based on the following data: [rules]\n\n{query}")
-        No tool calls — the data is inline so the model answers directly.
+        Sends: history → user("Based on the following data: [rules]\n\n{query}")
+        No system prompt — Rule 1 ("ALWAYS call a tool") suppresses context reading.
         """
         from .base_agent import _strip_thinking, MAX_TOKENS_TOOL
+        from config import BACKEND_THINK
         user_content = (
-            f"Based on the following AML rule performance data, answer the question below. "
+            f"Based on the following AML rule data, answer the question below. "
             f"Do not call any tools — use only the data provided.\n\n"
             f"{rule_list}\n\n"
             f"Question: {query}"
         )
-        # No system prompt here — Rule 1 ("ALWAYS call a tool") suppresses context reading.
-        # Without it, the base model reads from inline data exactly as in Ollama CLI.
         messages = list(history) + [{"role": "user", "content": user_content}]
-        msg = self._stream_llm(
+        # Call super() directly to bypass the tool-loop max_tokens bump (4096).
+        # Ranking queries are short; 1500 tokens is sufficient and keeps latency low.
+        extra = {"think": True} if BACKEND_THINK else {"chat_template_kwargs": {"enable_thinking": False}}
+        msg = super()._stream_llm(
             model=self.model,
             max_tokens=MAX_TOKENS_TOOL,
             temperature=0,
             messages=messages,
+            extra_body=extra,
         )
         return _strip_thinking(msg.content or ""), []
 
@@ -402,5 +407,11 @@ class ThresholdAgent(BaseAgent):
         if any(p in query_lower for p in _INVALID_PARAMS):
             return _REJECTION_MSG, []
         if policy_context and "=== RULE LIST ===" in policy_context:
-            return self._run_with_rule_list(query, policy_context, history or [])
+            # Only use _run_with_rule_list for ranking/sorting/counting queries.
+            # Tool-calling queries (SAR backtest, 2D sweep, threshold tuning, etc.) must go
+            # through the agentic loop WITHOUT the rule list context — otherwise the model
+            # reads rule metrics from the injected data and skips the tool call entirely.
+            if any(kw in query.lower() for kw in _RANKING_QUERY_TERMS):
+                return self._run_with_rule_list(query, policy_context, history or [])
+            return super().run(query, tool_executor, "", history)
         return super().run(query, tool_executor, policy_context, history)
