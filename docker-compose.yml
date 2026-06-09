@@ -1,0 +1,82 @@
+services:
+
+  # ── ARIA Dash app ──────────────────────────────────────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.app
+      args:
+        - HF_TOKEN=${HF_TOKEN:-}
+    ports:
+      - "8050:8050"
+    # XL data is downloaded at build time from speri420/aria-demo-data HF dataset
+    # into /app/aria_synth_xl/ (see docker/Dockerfile.app). No host bind-mount
+    # needed — the image is self-contained for users who clone + docker compose up.
+    environment:
+      - HF_TOKEN
+      - OLLAMA_BASE_URL
+      - OLLAMA_MODEL
+      - BACKEND_THINK
+      - PORT=8050
+    restart: unless-stopped
+
+  # ── Ollama backend (CPU / consumer GPU) ────────────────────────────────────
+  # Start with: docker compose --profile ollama up --build
+  # GGUF is downloaded during `docker build` (~4 GB, cached in the image layer).
+  # Subsequent builds use the Docker layer cache — no re-download unless ARGs change.
+  ollama:
+    profiles: [ollama]
+    build:
+      context: docker
+      dockerfile: Dockerfile.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+      - OLLAMA_FLASH_ATTENTION=1
+      - OLLAMA_KEEP_ALIVE=-1
+      - OLLAMA_MODEL
+      - HF_TOKEN
+      - HF_GGUF_FILE
+      - OLLAMA_NUM_CTX
+    volumes:
+      - ollama_models:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    ports:
+      - "11434:11434"
+
+  # ── vLLM backend (NVIDIA GPU, BF16) ───────────────────────────────────────
+  # Start with: docker compose --profile vllm up
+  # Requires nvidia-container-toolkit on the host.
+  # BF16 safetensors (~8 GB) are downloaded on first container run from HF Hub.
+  vllm:
+    profiles: [vllm]
+    image: vllm/vllm-openai:latest
+    runtime: nvidia
+    environment:
+      - HF_TOKEN
+      - VLLM_ATTENTION_BACKEND=FLASH_ATTENTION
+    command: >
+      --model speri420/${OLLAMA_MODEL}
+      --served-model-name ${OLLAMA_MODEL}
+      --host 0.0.0.0
+      --port 8000
+      --max-model-len 16384
+      --dtype bfloat16
+      --trust-remote-code
+      --gpu-memory-utilization 0.90
+      --enforce-eager
+      --reasoning-parser gemma4
+      --override-generation-config '{"enable_thinking": true}'
+    volumes:
+      - hf_cache:/root/.cache/huggingface
+    ports:
+      - "8000:8000"
+
+volumes:
+  hf_cache:
+  ollama_models:

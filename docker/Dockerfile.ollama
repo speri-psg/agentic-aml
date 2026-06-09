@@ -1,0 +1,11 @@
+FROM ollama/ollama:latest
+
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV OLLAMA_MODEL=aria-v22
+
+COPY ollama-startup.sh /startup.sh
+RUN chmod +x /startup.sh
+
+ENTRYPOINT ["/startup.sh"]
