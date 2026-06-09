@@ -29,7 +29,7 @@ OLLAMA_MODEL    = os.getenv("OLLAMA_MODEL",
                             os.getenv("VLLM_MODEL", "aria-v22"))
 
 # ── LLM generation parameters ────────────────────────────────────────────────
-MAX_TOKENS_TOOL   = int(os.getenv("MAX_TOKENS_TOOL",   "2048"))  # threshold / segmentation agents — 1024/1500 silently truncates long outputs (top5+bottom5, full overviews)
+MAX_TOKENS_TOOL   = int(os.getenv("MAX_TOKENS_TOOL",   "3000"))  # threshold / segmentation agents — bumped from 2048 on 2026-06-09 because compound queries like "bottom 5 and top 3 by alerts" need ~2400 to fit value-comparison reasoning + answer; at 2048 model emits empty content rather than truncating
 MAX_TOKENS_POLICY = int(os.getenv("MAX_TOKENS_POLICY", "4096"))  # policy agent (longer KB responses)
 MAX_TOOL_CALLS    = int(os.getenv("MAX_TOOL_CALLS",    "6"))      # max agentic loop iterations
 # Set BACKEND_THINK=true for local Ollama (think=True exhausts 1500-token budget before content).

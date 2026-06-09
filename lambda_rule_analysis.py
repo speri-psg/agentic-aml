@@ -384,63 +384,52 @@ def list_rules_text(df):
     """
     Pre-computed text listing available rules with SAR/FP counts and sweep options.
 
-    Lines are emitted in DESCENDING precision order (not catalog order). Catalog
-    order was forcing the model to do visual scanning across 21 entries to pick
-    "highest/lowest by metric", which it does poorly — modern-typology rules
-    (17, 18, 19, 20) and bottom-precision rules deep in the list got attention-
-    dropped and produced self-contradictory rankings (e.g., 'Rule 17 highest at
-    46.2%' alongside 'Rule 18 at 57.7%' in the same response). Sorting puts
-    answer-relevant items at positions 1-3 so the model reads them off rather
-    than computing them.
-
-    NOTE: rules keep their canonical 'Rule N:' ID (catalog index), only the
-    line ORDER changes. This is presentation, not pre-computed answers — the
-    model still picks the top/bottom from precision values itself.
+    Lines are emitted in CATALOG ID order (Rule 1, 2, 3, ..., 21). Switched from
+    precision-sort to catalog order 2026-06-09 after systematic A/B testing
+    across 18 ranking/enumeration queries showed catalog order produced 15/18
+    correct vs precision-sorted ~13/18 and random shuffles 11-14/18. The
+    "NUMBERS BEAT NAMES" nudge at the tail does the value-comparison work that
+    precision-sort used to do positionally; catalog order then makes adjacent-
+    rule queries (e.g. "rules with days_required" hits Rule 6, 7, 16) work
+    better because related rules cluster at the top of the list where attention
+    is strongest.
     """
-    # Collect per-rule stats once with catalog index attached.
-    rule_stats = []
-    for i, (_, entry) in enumerate(RULE_CATALOGUE.items(), 1):
-        rf   = entry["name"]
-        grp  = df[df["risk_factor"] == rf] if df is not None else pd.DataFrame()
-        n    = len(grp)
-        sar  = int(grp["is_sar"].sum()) if n > 0 else 0
-        fp   = int((grp["is_sar"] == 0).sum()) if n > 0 else 0
-        prec_val = round(100 * sar / (sar + fp), 1) if (sar + fp) > 0 else None
-        prec_str = f"{prec_val}%" if prec_val is not None else "n/a"
-        sweep_keys = ", ".join(entry["sweep_params"].keys())
-        rule_stats.append({
-            "num": i, "rf": rf, "alerts": n, "sar": sar, "fp": fp,
-            "precision_val": prec_val if prec_val is not None else -1,
-            "precision_str": prec_str, "sweep_keys": sweep_keys,
-        })
-
-    # Sort by precision descending. Ties keep catalog order via stable sort.
-    rule_stats.sort(key=lambda r: -r["precision_val"])
-
     lines = ["=== RULE LIST ==="]
     lines.append("Available AML rules with SAR/FP performance (detailed table shown in chart below):")
     lines.append(
-        "NOTE: This is the COMPLETE list of rules. Lines are presented in "
-        "DESCENDING ORDER OF PRECISION (highest first). Rule numbers are "
-        "catalog IDs (not line positions). Do NOT add or infer any rules not listed here."
+        "NOTE: This is the COMPLETE list of rules in catalog ID order. "
+        "Do NOT add or infer any rules not listed here."
     )
 
-    for r in rule_stats:
+    for i, (_, entry) in enumerate(RULE_CATALOGUE.items(), 1):
+        rf = entry["name"]
+        grp = df[df["risk_factor"] == rf] if df is not None else pd.DataFrame()
+        n = len(grp); sar = int(grp["is_sar"].sum()) if n > 0 else 0
+        fp = int((grp["is_sar"] == 0).sum()) if n > 0 else 0
+        prec_str = f"{round(100*sar/(sar+fp), 1)}%" if (sar + fp) > 0 else "n/a"
+        sweep_keys = ", ".join(entry["sweep_params"].keys())
         lines.append(
-            f"  Rule {r['num']}: {r['rf']}: alerts={r['alerts']}, "
-            f"SAR={r['sar']}, FP={r['fp']}, precision={r['precision_str']}, "
-            f"sweep_params=[{r['sweep_keys']}]"
+            f"  Rule {i}: {rf}: alerts={n}, "
+            f"SAR={sar}, FP={fp}, precision={prec_str}, "
+            f"sweep_params=[{sweep_keys}]"
         )
 
-    # Note: previously had an analytical nudge ("be analytical and double check
-    # the ranking order and parameters") here. Removed 2026-06-08 — observed in
-    # production that 'double check the ranking order' was triggering visible
-    # fake-rigor: model produced an initial answer, said 'reordering by lowest
-    # precision', then settled on a DIFFERENT wrong answer. Both attempts shown
-    # to the user. The 'double check' instruction caused doubt-and-redo without
-    # new information; the model just re-ran the same attention pattern and
-    # landed at a different position. Sort + simple NOTE does the heavy lifting;
-    # extra reasoning hints induce dance, not accuracy.
+    # ── REASONING NUDGE (added 2026-06-09) ─────────────────────────────────
+    # The bare model with thinking=True hits 8/9 on ranking queries; without
+    # thinking it drops to ~3/9 because attention salience picks familiar
+    # rules (Rule 3 Elder Abuse over Rule 18 Mule Activation for top SARs,
+    # Rule 1 ACH over Rule 5 Detect Excessive for bottom precision, etc.).
+    # This nudge cues the model to compare numeric values across rules
+    # before naming a result — the same strategy thinking mode triggers
+    # naturally. Targets ranking patterns specifically; off-axis queries
+    # (definitional, param-lookup) are unaffected by the conditional clause.
+    lines.append("")
+    lines.append(
+        "For ranking questions (top/bottom by precision, SARs, FPs, or alerts), "
+        "compare exact numeric values across every rule. NUMBERS BEAT NAMES: "
+        "the rule with the strictly highest or lowest value wins, even when a "
+        "more familiar rule has a similar number. Pick by value, not by salience."
+    )
     lines.append("=== END RULE LIST ===")
     return "\n".join(lines)
 
